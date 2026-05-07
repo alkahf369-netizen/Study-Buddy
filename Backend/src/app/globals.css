@@ -1,0 +1,469 @@
+@import "tailwindcss";
+
+body {
+    margin: 0;
+    font-family:
+        -apple-system, BlinkMacSystemFont, "Segoe UI", "Roboto", "Oxygen",
+        "Ubuntu", "Cantarell", "Fira Sans", "Droid Sans", "Helvetica Neue",
+        sans-serif;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+}
+
+code {
+    font-family:
+        source-code-pro, Menlo, Monaco, Consolas, "Courier New", monospace;
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-chart-1: var(--chart-1);
+  --color-chart-2: var(--chart-2);
+  --color-chart-3: var(--chart-3);
+  --color-chart-4: var(--chart-4);
+  --color-chart-5: var(--chart-5);
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+}
+
+@layer base {
+  :root {
+        --background: 0 0% 100%;
+        --foreground: 0 0% 3.9%;
+        --card: 0 0% 100%;
+        --card-foreground: 0 0% 3.9%;
+        --popover: 0 0% 100%;
+        --popover-foreground: 0 0% 3.9%;
+        --primary: 0 0% 9%;
+        --primary-foreground: 0 0% 98%;
+        --secondary: 0 0% 96.1%;
+        --secondary-foreground: 0 0% 9%;
+        --muted: 0 0% 96.1%;
+        --muted-foreground: 0 0% 45.1%;
+        --accent: 0 0% 96.1%;
+        --accent-foreground: 0 0% 9%;
+        --destructive: 0 84.2% 60.2%;
+        --destructive-foreground: 0 0% 98%;
+        --border: 0 0% 89.8%;
+        --input: 0 0% 89.8%;
+        --ring: 0 0% 3.9%;
+        --chart-1: 12 76% 61%;
+        --chart-2: 173 58% 39%;
+        --chart-3: 197 37% 24%;
+        --chart-4: 43 74% 66%;
+        --chart-5: 27 87% 67%;
+        --radius: 0.5rem;
+  }
+  .dark {
+        --background: 0 0% 3.9%;
+        --foreground: 0 0% 98%;
+        --card: 0 0% 3.9%;
+        --card-foreground: 0 0% 98%;
+        --popover: 0 0% 3.9%;
+        --popover-foreground: 0 0% 98%;
+        --primary: 0 0% 98%;
+        --primary-foreground: 0 0% 9%;
+        --secondary: 0 0% 14.9%;
+        --secondary-foreground: 0 0% 98%;
+        --muted: 0 0% 14.9%;
+        --muted-foreground: 0 0% 63.9%;
+        --accent: 0 0% 14.9%;
+        --accent-foreground: 0 0% 98%;
+        --destructive: 0 62.8% 30.6%;
+        --destructive-foreground: 0 0% 98%;
+        --border: 0 0% 14.9%;
+        --input: 0 0% 14.9%;
+        --ring: 0 0% 83.1%;
+        --chart-1: 220 70% 50%;
+        --chart-2: 160 60% 45%;
+        --chart-3: 30 80% 55%;
+        --chart-4: 280 65% 60%;
+        --chart-5: 340 75% 55%;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+  body {
+    @apply bg-background text-foreground;
+  }
+}
+
+/* ============================================================
+   AI "Thinking" indicator — multi-layer animation
+   (sonar pulse + breathing avatar + EQ bars + shimmer text)
+   ============================================================ */
+
+/* -- 1. EQ-style bars that scale rhythmically -- */
+@keyframes sa-eq {
+  0%, 100% { transform: scaleY(0.28); }
+  50%      { transform: scaleY(1); }
+}
+
+.sa-eq-bar {
+  display: inline-block;
+  width: 3px;
+  height: 18px;
+  background: #111;
+  border-radius: 2px;
+  transform-origin: 50% 100%;
+  animation: sa-eq 1s ease-in-out infinite;
+}
+
+.sa-eq-bar:nth-child(1) { animation-delay: 0ms;   }
+.sa-eq-bar:nth-child(2) { animation-delay: 120ms; }
+.sa-eq-bar:nth-child(3) { animation-delay: 240ms; }
+.sa-eq-bar:nth-child(4) { animation-delay: 360ms; }
+.sa-eq-bar:nth-child(5) { animation-delay: 180ms; }
+
+/* -- 2. Shimmer sweep across the "Thinking" text -- */
+@keyframes sa-shimmer {
+  0%   { background-position: -200% center; }
+  100% { background-position:  200% center; }
+}
+
+.sa-shimmer-text {
+  background: linear-gradient(
+    90deg,
+    rgba(0, 0, 0, 0.25) 0%,
+    rgba(0, 0, 0, 0.95) 45%,
+    rgba(0, 0, 0, 0.25) 80%
+  );
+  background-size: 200% 100%;
+  -webkit-background-clip: text;
+          background-clip: text;
+  -webkit-text-fill-color: transparent;
+          color: transparent;
+  animation: sa-shimmer 1.6s linear infinite;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+
+/* -- 3. Sonar pulse rings around the avatar -- */
+@keyframes sa-ping {
+  0%   { transform: scale(0.85); opacity: 0.55; }
+  80%  { transform: scale(1.6);  opacity: 0;    }
+  100% { transform: scale(1.6);  opacity: 0;    }
+}
+
+.sa-ping-ring {
+  position: absolute;
+  inset: 0;
+  border-radius: 9999px;
+  border: 1.5px solid rgba(0, 0, 0, 0.55);
+  animation: sa-ping 1.6s cubic-bezier(0.2, 0.6, 0.4, 1) infinite;
+  pointer-events: none;
+}
+
+.sa-ping-ring.delay-1 { animation-delay: 0.55s; }
+
+/* -- 4. Subtle breathing on the avatar itself -- */
+@keyframes sa-breathe {
+  0%, 100% { transform: scale(1);    box-shadow: 0 0 0 0 rgba(0, 0, 0, 0.18); }
+  50%      { transform: scale(1.04); box-shadow: 0 0 0 4px rgba(0, 0, 0, 0.06); }
+}
+
+.sa-breathe {
+  animation: sa-breathe 2.2s ease-in-out infinite;
+}
+
+/* Optional: respect reduced-motion preferences */
+@media (prefers-reduced-motion: reduce) {
+  .sa-eq-bar,
+  .sa-shimmer-text,
+  .sa-ping-ring,
+  .sa-breathe {
+    animation: none !important;
+  }
+}
+
+/* --- Scroll lock utility --- */
+.antigravity-scroll-lock {
+  overflow: hidden !important;
+}
+
+/* ================================================================
+   AI Response Markdown — beautiful, readable formatting
+   ================================================================ */
+
+.sa-markdown {
+  line-height: 1.75;
+  font-size: 14.5px;
+  color: #27272a;
+}
+
+/* Headings */
+.sa-markdown h1,
+.sa-markdown h2,
+.sa-markdown h3,
+.sa-markdown h4 {
+  font-weight: 700;
+  color: #18181b;
+  margin-top: 1.25em;
+  margin-bottom: 0.5em;
+  line-height: 1.35;
+}
+
+.sa-markdown h1 { font-size: 1.35em; }
+.sa-markdown h2 { font-size: 1.2em; }
+.sa-markdown h3 {
+  font-size: 1.05em;
+  padding-bottom: 0.3em;
+  border-bottom: 1px solid #e4e4e7;
+}
+.sa-markdown h4 { font-size: 0.95em; color: #3f3f46; }
+
+/* First heading should not have top margin */
+.sa-markdown > :first-child {
+  margin-top: 0 !important;
+}
+
+/* Paragraphs */
+.sa-markdown p {
+  margin: 0.65em 0;
+}
+.sa-markdown p:last-child {
+  margin-bottom: 0;
+}
+
+/* Bold & italic */
+.sa-markdown strong {
+  font-weight: 650;
+  color: #18181b;
+}
+
+/* Lists */
+.sa-markdown ul,
+.sa-markdown ol {
+  margin: 0.5em 0;
+  padding-left: 1.5em;
+}
+
+.sa-markdown ul { list-style-type: disc; }
+.sa-markdown ol { list-style-type: decimal; }
+
+.sa-markdown li {
+  margin: 0.3em 0;
+  padding-left: 0.25em;
+}
+
+.sa-markdown li::marker {
+  color: #a1a1aa;
+}
+
+/* Nested lists */
+.sa-markdown ul ul,
+.sa-markdown ol ul {
+  list-style-type: circle;
+}
+
+/* Inline code */
+.sa-markdown code:not(pre code) {
+  background: #f4f4f5;
+  border: 1px solid #e4e4e7;
+  border-radius: 5px;
+  padding: 0.15em 0.4em;
+  font-size: 0.88em;
+  font-family: 'JetBrains Mono', 'Fira Code', 'Cascadia Code', monospace;
+  color: #18181b;
+  font-weight: 500;
+}
+
+/* Code blocks */
+.sa-markdown pre {
+  background: #18181b;
+  color: #e4e4e7;
+  border-radius: 10px;
+  padding: 1em 1.25em;
+  margin: 0.75em 0;
+  overflow-x: auto;
+  font-size: 0.85em;
+  line-height: 1.65;
+  border: 1px solid #27272a;
+}
+
+.sa-markdown pre code {
+  background: none;
+  border: none;
+  padding: 0;
+  font-size: inherit;
+  color: inherit;
+  font-family: 'JetBrains Mono', 'Fira Code', 'Cascadia Code', monospace;
+}
+
+/* Blockquotes */
+.sa-markdown blockquote {
+  border-left: 3px solid #a1a1aa;
+  padding: 0.5em 1em;
+  margin: 0.75em 0;
+  background: #fafafa;
+  border-radius: 0 8px 8px 0;
+  color: #52525b;
+  font-style: italic;
+}
+
+.sa-markdown blockquote p {
+  margin: 0.25em 0;
+}
+
+/* Tables */
+.sa-markdown table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 0.75em 0;
+  font-size: 0.9em;
+  border-radius: 8px;
+  overflow: hidden;
+  border: 1px solid #e4e4e7;
+}
+
+.sa-markdown th {
+  background: #f4f4f5;
+  font-weight: 600;
+  text-align: left;
+  padding: 0.6em 0.8em;
+  border-bottom: 2px solid #d4d4d8;
+  color: #18181b;
+  font-size: 0.92em;
+}
+
+.sa-markdown td {
+  padding: 0.5em 0.8em;
+  border-bottom: 1px solid #f4f4f5;
+}
+
+.sa-markdown tr:last-child td {
+  border-bottom: none;
+}
+
+.sa-markdown tr:hover td {
+  background: #fafafa;
+}
+
+/* Horizontal rule */
+.sa-markdown hr {
+  border: none;
+  height: 1px;
+  background: #e4e4e7;
+  margin: 1.25em 0;
+}
+
+/* Links */
+.sa-markdown a {
+  color: #2563eb;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  transition: color 0.15s;
+}
+
+.sa-markdown a:hover {
+  color: #1d4ed8;
+}
+
+/* ============================================================
+   LoginPage (LP) animations — strict black/white palette
+   ============================================================ */
+
+/* blinking caret for the typewriter headline */
+@keyframes lp-caret-blink {
+  0%, 49%   { opacity: 1; }
+  50%, 100% { opacity: 0; }
+}
+.lp-caret { animation: lp-caret-blink 1.05s steps(1, end) infinite; }
+
+/* subtle orb drift on the brand panel */
+@keyframes lp-orb-drift {
+  0%, 100% { transform: translate3d(0,0,0)    scale(1);   }
+  50%      { transform: translate3d(30px,-20px,0) scale(1.08); }
+}
+.lp-orb   { animation: lp-orb-drift 12s ease-in-out infinite; }
+.lp-orb-2 { animation: lp-orb-drift 16s ease-in-out infinite reverse; }
+
+/* diagonal light sweep across the brand panel */
+@keyframes lp-sweep {
+  0%   { transform: translateX(-120%) rotate(18deg); opacity: 0;    }
+  30%  { opacity: 0.28; }
+  70%  { opacity: 0.28; }
+  100% { transform: translateX(130%)  rotate(18deg); opacity: 0;    }
+}
+.lp-sweep {
+  background: linear-gradient(
+    90deg,
+    transparent 0%,
+    rgba(255,255,255,0.18) 50%,
+    transparent 100%
+  );
+  width: 45%;
+  height: 160%;
+  top: -30%;
+  left: 0;
+  position: absolute;
+  animation: lp-sweep 6.5s ease-in-out infinite;
+}
+
+/* pop-in for tick icons, done state */
+@keyframes lp-pop {
+  0%   { opacity: 0; transform: scale(0.7);  }
+  60%  { opacity: 1; transform: scale(1.08); }
+  100% { opacity: 1; transform: scale(1);    }
+}
+.lp-pop { animation: lp-pop 260ms cubic-bezier(0.3, 1.4, 0.5, 1) both; }
+
+/* shine sweep across the primary submit button */
+@keyframes lp-shine {
+  0%   { transform: translateX(0);      opacity: 0;   }
+  20%  { opacity: 0.9; }
+  100% { transform: translateX(500%);   opacity: 0;   }
+}
+.lp-shine { animation: lp-shine 2.4s ease-in-out infinite; }
+
+/* pulsing dot on the brand lockup icon */
+@keyframes lp-ping-dot {
+  0%, 100% { transform: scale(1);    opacity: 1;   }
+  50%      { transform: scale(1.35); opacity: 0.6; }
+}
+.lp-ping-dot { animation: lp-ping-dot 1.6s ease-in-out infinite; }
+
+/* staggered slide-in for the feature bullets */
+@keyframes lp-feature-in {
+  from { opacity: 0; transform: translateY(6px); }
+  to   { opacity: 1; transform: translateY(0);   }
+}
+.lp-feature-in { animation: lp-feature-in 380ms cubic-bezier(0.22, 0.85, 0.3, 1) both; }
+
+/* Respect reduced motion for LP animations */
+@media (prefers-reduced-motion: reduce) {
+  .lp-caret,
+  .lp-orb,
+  .lp-orb-2,
+  .lp-sweep,
+  .lp-pop,
+  .lp-shine,
+  .lp-ping-dot,
+  .lp-feature-in {
+    animation: none !important;
+  }
+}
+

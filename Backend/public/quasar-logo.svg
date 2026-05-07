@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 120" fill="none">
+  <!-- Q circle -->
+  <circle cx="52" cy="52" r="28" stroke="currentColor" stroke-width="5.5" fill="none"/>
+  <!-- Q tail (diagonal line extending from circle) -->
+  <line x1="72" y1="72" x2="105" y2="105" stroke="currentColor" stroke-width="5.5" stroke-linecap="round"/>
+  <!-- 4-pointed sparkle/star in center of circle -->
+  <path d="M52,32 Q54.5,47 67,52 Q54.5,57 52,72 Q49.5,57 37,52 Q49.5,47 52,32Z" fill="currentColor"/>
+</svg>

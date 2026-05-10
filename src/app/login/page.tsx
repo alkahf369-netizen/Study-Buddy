@@ -1,30 +1,35 @@
 "use client";
-
 import React, { useState, useEffect, useRef } from "react";
 import { signIn } from "next-auth/react";
-import Image from "next/image";
 import {
   ArrowRight,
   Loader2,
   Check,
   ShieldCheck,
+  Sparkles,
   Sparkle,
+  Infinity as InfinityIcon,
+  Command,
   Zap,
   Lock,
   RefreshCw,
 } from "lucide-react";
 
 /* ========================================================================
- * LoginPage — Google-only sign-in (Adapted from Emergent for Next.js)
+ * LoginPage — Google-only sign-in
  * ------------------------------------------------------------------------
  * Strict black / white / grayscale palette. Split-screen layout with an
  * animated brand panel and a clean, single-CTA Google sign-in card.
+ *
+ * Usage:
+ *   <LoginPage onAuthSuccess={(payload) => ...} onGoogle={(cb) => ...} />
+ *
+ * If `onGoogle` is not provided, runs in demo mode with a 1.2 s mock flow.
  * ====================================================================== */
 
-const cn = (...cls: (string | boolean | undefined | null)[]) =>
-  cls.filter(Boolean).join(" ");
+const cn = (...cls) => cls.filter(Boolean).join(" ");
 
-/* ---------------- Monochrome "G" glyph ---------------- */
+/* ---------------- Monochrome "G" glyph (not the official Google logo) ---------------- */
 const GoogleGlyph = ({ className = "h-[18px] w-[18px]" }) => (
   <svg
     viewBox="0 0 24 24"
@@ -42,30 +47,44 @@ const GoogleGlyph = ({ className = "h-[18px] w-[18px]" }) => (
   </svg>
 );
 
+/* Quasar AI brand logo — vector. Uses currentColor so it adapts to
+   surrounding text color. */
+const QuasarLogo = ({ className = "", strokeWidth = 3.8 }) => (
+  <svg
+    viewBox="0 0 64 64"
+    fill="none"
+    xmlns="http://www.w3.org/2000/svg"
+    className={className}
+    aria-hidden="true"
+  >
+    <circle cx="27" cy="30" r="20" stroke="currentColor" strokeWidth={strokeWidth} />
+    <path
+      d="M27 13.5 C27 23.5 28 26 36 30 C28 34 27 36.5 27 46.5 C27 36.5 26 34 18 30 C26 26 27 23.5 27 13.5 Z"
+      fill="currentColor"
+    />
+    <path
+      d="M36.5 39 L52 54.5"
+      stroke="currentColor"
+      strokeWidth={strokeWidth + 0.6}
+      strokeLinecap="round"
+    />
+  </svg>
+);
+
 /* ---------------- Wordmark ---------------- */
-const WordMark = ({
-  onDark = true,
-  className = "",
-}: {
-  onDark?: boolean;
-  className?: string;
-}) => (
-  <div className={cn("inline-flex items-center gap-2", className)}>
-    <Image 
-      src="/new-logo.png" 
-      alt="Quasar AI Logo" 
-      width={32} 
-      height={32} 
-      className={cn("rounded-lg", !onDark && "ring-1 ring-zinc-200")}
+const WordMark = ({ onDark = true, className = "" }) => (
+  <div className={cn("inline-flex items-center gap-2.5", className)}>
+    <QuasarLogo
+      className={cn("h-7 w-7", onDark ? "text-white" : "text-black")}
     />
     <span
       className={cn(
-        "text-[15px] font-semibold tracking-[0.18em]",
+        "text-[16px] font-semibold tracking-[-0.005em]",
         onDark ? "text-white" : "text-black"
       )}
-      style={{ fontFamily: "var(--font-manrope), system-ui, sans-serif" }}
+      style={{ fontFamily: "'Manrope', system-ui, sans-serif" }}
     >
-      QUASAR·AI
+      Quasar AI
     </span>
   </div>
 );
@@ -84,20 +103,6 @@ const BrandPanel = () => {
   const [taglineIdx, setTaglineIdx] = useState(0);
   const [typed, setTyped] = useState("");
   const [deleting, setDeleting] = useState(false);
-  const [tick, setTick] = useState(0);
-
-  // Resume animation when returning to tab
-  useEffect(() => {
-    const onVis = () => {
-      if (document.visibilityState === "visible") setTick((n) => n + 1);
-    };
-    window.addEventListener("pageshow", onVis);
-    document.addEventListener("visibilitychange", onVis);
-    return () => {
-      window.removeEventListener("pageshow", onVis);
-      document.removeEventListener("visibilitychange", onVis);
-    };
-  }, []);
 
   // Typewriter
   useEffect(() => {
@@ -118,11 +123,11 @@ const BrandPanel = () => {
       );
     }, speed);
     return () => clearTimeout(t);
-  }, [typed, deleting, taglineIdx, tick]);
+  }, [typed, deleting, taglineIdx]);
 
   // Mouse-reactive dot grid
-  const gridRef = useRef<HTMLDivElement>(null);
-  const onMove = (e: React.MouseEvent) => {
+  const gridRef = useRef(null);
+  const onMove = (e) => {
     const el = gridRef.current;
     if (!el) return;
     const rect = el.getBoundingClientRect();
@@ -174,7 +179,7 @@ const BrandPanel = () => {
         <div className="max-w-[460px]">
           <h1
             className="text-[36px] font-bold leading-[1.05] tracking-tight lg:text-[46px]"
-            style={{ fontFamily: "var(--font-manrope), system-ui, sans-serif" }}
+            style={{ fontFamily: "'Manrope', system-ui, sans-serif" }}
           >
             <span className="block min-h-[1.2em]">
               {typed}
@@ -192,8 +197,10 @@ const BrandPanel = () => {
 };
 
 /* =====================================================================
- * MAIN: LoginPage (Google-only, Next.js Auth.js integration)
+ * MAIN: LoginPage (Google-only)
  * ==================================================================== */
+
+
 export default function LoginPage() {
   const [busy, setBusy] = useState(false);
   const [done, setDone] = useState(false);
@@ -264,7 +271,7 @@ export default function LoginPage() {
         {/* center card */}
         <div className="flex flex-1 items-center justify-center px-5 py-8 sm:px-8">
           <div className="w-full max-w-[440px]">
-            {/* The card itself */}
+            {/* The card itself — gives visual weight against the white panel */}
             <div className="relative overflow-hidden rounded-[22px] border border-zinc-200 bg-white p-7 shadow-[0_10px_40px_rgba(17,24,39,0.06)] sm:p-9">
               {/* subtle top-edge highlight */}
               <div
@@ -275,13 +282,10 @@ export default function LoginPage() {
               {/* Brand lockup icon */}
               <div className="mb-6 flex items-center justify-center">
                 <div className="relative">
-                  <Image 
-                    src="/new-logo.png" 
-                    alt="Quasar AI" 
-                    width={56} 
-                    height={56} 
-                    className="rounded-2xl shadow-[0_8px_24px_rgba(0,0,0,0.18)]"
-                  />
+                  <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-black text-white shadow-[0_8px_24px_rgba(0,0,0,0.18)]">
+                    <Sparkle className="h-6 w-6" strokeWidth={2.4} />
+                  </div>
+                  <span className="lp-ping-dot absolute -right-1 -top-1 h-3 w-3 rounded-full bg-black ring-[3px] ring-white" />
                 </div>
               </div>
 
@@ -289,7 +293,7 @@ export default function LoginPage() {
               <div className="text-center">
                 <h2
                   className="text-[26px] font-bold leading-tight tracking-tight text-black sm:text-[30px]"
-                  style={{ fontFamily: "var(--font-manrope), system-ui, sans-serif" }}
+                  style={{ fontFamily: "'Manrope', system-ui, sans-serif" }}
                 >
                   Welcome back
                 </h2>
@@ -350,7 +354,7 @@ export default function LoginPage() {
                 <div className="h-px flex-1 bg-zinc-200" />
               </div>
 
-              {/* Benefit bullets */}
+              {/* Benefit bullets — adds density & readability */}
               <ul className="space-y-2.5">
                 {[
                   {
@@ -391,37 +395,43 @@ export default function LoginPage() {
             </div>
 
             {/* Below-card trust row */}
-            <div className="mt-5 flex items-center justify-center gap-4 text-[11.5px] text-zinc-500">
+            <div className="mt-5 flex flex-wrap items-center justify-center gap-x-3 gap-y-1 text-[11.5px] text-zinc-500">
               <span className="inline-flex items-center gap-1.5">
                 <ShieldCheck className="h-[12px] w-[12px]" />
                 OAuth 2.0 · Encrypted
               </span>
-              <span className="h-1 w-1 rounded-full bg-zinc-300" />
-              <span>Free forever tier</span>
+              <span className="hidden h-1 w-1 rounded-full bg-zinc-300 sm:inline-block" />
+              <span className="whitespace-nowrap">Free forever tier</span>
             </div>
 
             {/* Legal */}
             <p className="mt-5 text-center text-[11.5px] leading-relaxed text-zinc-500">
               By continuing you agree to our{" "}
-              <span className="font-semibold text-black underline-offset-2 hover:underline cursor-pointer">
+              <a
+                href="#terms"
+                className="font-semibold text-black underline-offset-2 hover:underline"
+              >
                 Terms
-              </span>{" "}
+              </a>{" "}
               and{" "}
-              <span className="font-semibold text-black underline-offset-2 hover:underline cursor-pointer">
+              <a
+                href="#privacy"
+                className="font-semibold text-black underline-offset-2 hover:underline"
+              >
                 Privacy Policy
-              </span>
+              </a>
               .
             </p>
           </div>
         </div>
 
         {/* Mobile footer */}
-        <div className="flex items-center justify-center gap-4 px-5 pb-6 text-[11px] text-zinc-500 sm:px-8 md:hidden">
+        <div className="flex flex-wrap items-center justify-center gap-x-3 gap-y-1 px-5 pb-20 pt-2 text-center text-[11px] text-zinc-500 sm:px-8 md:hidden">
           <span className="inline-flex items-center gap-1">
             <ShieldCheck className="h-[11px] w-[11px]" /> Secure
           </span>
-          <span className="h-1 w-1 rounded-full bg-zinc-300" />
-          <span>More sign-in options coming soon</span>
+          <span className="hidden h-1 w-1 rounded-full bg-zinc-300 xs:inline-block" />
+          <span className="whitespace-nowrap">More options coming soon</span>
         </div>
       </div>
     </div>

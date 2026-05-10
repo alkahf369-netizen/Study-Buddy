@@ -1,4 +1,5 @@
 import React, { useState, useRef, useEffect, useCallback, useMemo } from "react";
+import { useRouter } from "next/navigation";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import {
@@ -49,6 +50,8 @@ import {
   Layers,
   ImageOff,
   BarChart3,
+  Code,
+  BookOpen,
 } from "lucide-react";
 
 /* Quasar AI Logo — Q with sparkle star (inline SVG, uses currentColor) */
@@ -230,7 +233,7 @@ const ComplexityPicker = ({ value, onChange }) => {
       <button
         data-testid="complexity-trigger"
         onClick={() => setOpen((v) => !v)}
-        className="inline-flex items-center gap-2 rounded-lg border border-zinc-200 bg-white px-3 py-1.5 text-[13px] font-medium text-zinc-800 transition hover:border-zinc-400 hover:bg-zinc-50"
+        className="inline-flex items-center gap-1.5 rounded-lg border border-zinc-200 bg-white px-2 py-1.5 text-[13px] font-medium text-zinc-800 transition hover:border-zinc-400 hover:bg-zinc-50 sm:gap-2 sm:px-3"
       >
         <span className="flex h-5 w-5 items-center justify-center rounded-md bg-black text-white ring-1 ring-black/10">
           <CurrentIcon className="h-3 w-3" />
@@ -245,10 +248,15 @@ const ComplexityPicker = ({ value, onChange }) => {
       </button>
 
       {open && (
-        <div
-          data-testid="complexity-dropdown"
-          className="absolute bottom-full left-0 z-50 mb-2 w-[300px] origin-bottom-left rounded-xl border border-zinc-200 bg-white p-1.5 shadow-[0_12px_40px_rgba(17,24,39,0.12)]"
-        >
+        <>
+          <div 
+            className="fixed inset-0 z-[100] bg-black/20 backdrop-blur-sm sm:hidden" 
+            onClick={(e) => { e.stopPropagation(); setOpen(false); }}
+          />
+          <div
+            data-testid="complexity-dropdown"
+            className="fixed left-1/2 top-1/2 z-[101] w-[280px] -translate-x-1/2 -translate-y-1/2 rounded-xl border border-zinc-200 bg-white p-1.5 shadow-2xl sm:absolute sm:bottom-full sm:left-0 sm:top-auto sm:mb-2 sm:w-[300px] sm:-translate-x-0 sm:-translate-y-0 sm:origin-bottom-left sm:shadow-[0_12px_40px_rgba(17,24,39,0.12)]"
+          >
           <div className="px-3 pb-1 pt-2 text-[10px] font-semibold uppercase tracking-wider text-zinc-500">
             Complexity
           </div>
@@ -298,6 +306,7 @@ const ComplexityPicker = ({ value, onChange }) => {
             );
           })}
         </div>
+        </>
       )}
     </div>
   );
@@ -319,14 +328,14 @@ const CountStepper = ({ value, onChange, aiAuto, onToggleAiAuto, min = 1, max = 
             : "Let AI decide the number of questions"
         }
         className={cn(
-          "flex items-center gap-1.5 px-2.5 text-[12px] font-semibold transition-colors",
+          "flex items-center gap-1.5 px-2.5 text-[12px] font-semibold transition-colors sm:px-3",
           aiAuto
             ? "bg-black text-white"
             : "text-zinc-600 hover:bg-zinc-50 hover:text-black"
         )}
       >
         <Wand2 className="h-[13px] w-[13px]" />
-        Auto
+        <span className="hidden sm:inline">Auto</span>
       </button>
 
       <span className="w-px bg-zinc-200" />
@@ -342,14 +351,14 @@ const CountStepper = ({ value, onChange, aiAuto, onToggleAiAuto, min = 1, max = 
           data-testid="count-dec"
           onClick={dec}
           disabled={aiAuto || value <= min}
-          className="flex h-full w-7 items-center justify-center text-zinc-600 transition hover:bg-zinc-50 hover:text-black disabled:cursor-not-allowed disabled:opacity-40"
+          className="flex h-full w-7 items-center justify-center text-zinc-600 transition hover:bg-zinc-50 hover:text-black disabled:cursor-not-allowed disabled:opacity-40 sm:w-8"
           aria-label="Decrease"
         >
           <Minus className="h-[13px] w-[13px]" />
         </button>
         <span
           data-testid="count-value"
-          className="flex min-w-[36px] items-center justify-center px-1 text-[13px] font-semibold tabular-nums text-black"
+          className="flex min-w-[28px] items-center justify-center px-1 text-[13px] font-semibold tabular-nums text-black sm:min-w-[36px]"
         >
           {aiAuto ? "—" : value}
         </span>
@@ -357,7 +366,7 @@ const CountStepper = ({ value, onChange, aiAuto, onToggleAiAuto, min = 1, max = 
           data-testid="count-inc"
           onClick={inc}
           disabled={aiAuto || value >= max}
-          className="flex h-full w-7 items-center justify-center text-zinc-600 transition hover:bg-zinc-50 hover:text-black disabled:cursor-not-allowed disabled:opacity-40"
+          className="flex h-full w-7 items-center justify-center text-zinc-600 transition hover:bg-zinc-50 hover:text-black disabled:cursor-not-allowed disabled:opacity-40 sm:w-8"
           aria-label="Increase"
         >
           <Plus className="h-[13px] w-[13px]" />
@@ -766,12 +775,20 @@ const ModelSwitcher = ({ models, value, onChange }) => {
       <button
         data-testid="model-switcher"
         onClick={() => setOpen((v) => !v)}
-        className="inline-flex items-center gap-2 rounded-lg border border-zinc-200 bg-white px-3 py-1.5 text-[13px] font-medium text-zinc-800 transition hover:border-zinc-400 hover:bg-zinc-50"
+        className="inline-flex items-center gap-1.5 rounded-lg border border-zinc-200 bg-white px-2 py-1.5 text-[13px] font-medium text-zinc-800 transition hover:border-zinc-400 hover:bg-zinc-50 sm:gap-2 sm:px-3"
       >
-        <span className="flex h-5 w-5 items-center justify-center rounded-md bg-black text-white ring-1 ring-black/10">
-          <Bot className="h-3 w-3" />
-        </span>
-        <span className="max-w-[160px] truncate">{current?.name || "Select Model"}</span>
+        {current?.provider && models.some(m => m.provider === current.provider) ? (
+          <img
+            src={`/icons/${current.provider.toLowerCase()}.png`}
+            alt={current.provider}
+            className="h-5 w-5 rounded-md object-contain"
+          />
+        ) : (
+          <span className="flex h-5 w-5 items-center justify-center rounded-md bg-black text-white ring-1 ring-black/10">
+            <Bot className="h-3 w-3" />
+          </span>
+        )}
+        <span className="hidden max-w-[160px] truncate sm:inline">{current?.name || "Select Model"}</span>
         <ChevronDown
           className={cn(
             "h-[14px] w-[14px] text-zinc-500 transition-transform",
@@ -783,10 +800,10 @@ const ModelSwitcher = ({ models, value, onChange }) => {
       {open && (
         <div
           data-testid="model-dropdown"
-          className="absolute bottom-full left-0 z-50 mb-2 flex w-[380px] h-[330px] origin-bottom-left rounded-xl border border-zinc-200 bg-white shadow-[0_12px_40px_rgba(17,24,39,0.12)] overflow-hidden"
+          className="absolute bottom-full left-0 z-50 mb-2 flex w-[260px] h-[220px] origin-bottom-left rounded-xl border border-zinc-200 bg-white shadow-[0_12px_40px_rgba(17,24,39,0.12)] overflow-hidden sm:w-[380px] sm:h-[330px]"
         >
           {/* Left Sidebar - Providers */}
-          <div className="flex w-[52px] shrink-0 flex-col items-center gap-2 border-r border-zinc-100 bg-zinc-50/50 py-2.5 [scrollbar-width:none] overflow-y-auto">
+          <div className="flex w-[40px] shrink-0 flex-col items-center gap-1.5 border-r border-zinc-100 bg-zinc-50/50 py-2 [scrollbar-width:none] overflow-y-auto sm:w-[52px] sm:gap-2 sm:py-2.5">
              {mainBrands.map((brand) => {
                if (!models.some(m => m.provider === brand)) return null;
                return (
@@ -795,7 +812,7 @@ const ModelSwitcher = ({ models, value, onChange }) => {
                    title={brand}
                    onClick={(e) => { e.stopPropagation(); setSelectedProvider(brand); setFocusedIndex(0); }}
                    className={cn(
-                     "flex h-9 w-9 items-center justify-center rounded-xl transition-all overflow-hidden",
+                     "flex h-7 w-7 items-center justify-center rounded-lg transition-all overflow-hidden sm:h-9 sm:w-9 sm:rounded-xl",
                      selectedProvider === brand 
                        ? "bg-white shadow-sm ring-1 ring-zinc-200/50 scale-105 grayscale-0 opacity-100" 
                        : "hover:bg-zinc-100 grayscale opacity-60 hover:opacity-100"
@@ -804,22 +821,22 @@ const ModelSwitcher = ({ models, value, onChange }) => {
                     <img 
                       src={`/icons/${brand.toLowerCase()}.png`} 
                       alt={brand} 
-                      className={cn("object-contain", brand === 'Gemini' ? "h-[26px] w-[26px]" : "h-[22px] w-[22px]")} 
+                      className={cn("object-contain", brand === 'Gemini' ? "h-[20px] w-[20px] sm:h-[26px] sm:w-[26px]" : "h-[16px] w-[16px] sm:h-[22px] sm:w-[22px]")} 
                     />
                  </button>
                );
              })}
              
-             <div className="flex-1 min-h-[12px]" />
+             <div className="hidden flex-1 sm:block min-h-[12px]" />
              <button
                title="Other Models"
                onClick={(e) => { e.stopPropagation(); setSelectedProvider("Other"); setFocusedIndex(0); }}
                className={cn(
-                 "flex h-9 w-9 items-center justify-center rounded-xl transition-all",
+                 "flex h-7 w-7 items-center justify-center rounded-lg transition-all sm:h-9 sm:w-9 sm:rounded-xl",
                  selectedProvider === "Other" ? "bg-white shadow-sm ring-1 ring-zinc-200/50 text-black" : "hover:bg-zinc-100 text-zinc-400"
                )}
              >
-                <Layers className="h-[22px] w-[22px]" />
+                <Layers className="h-[16px] w-[16px] sm:h-[22px] sm:w-[22px]" />
              </button>
           </div>
 
@@ -842,7 +859,7 @@ const ModelSwitcher = ({ models, value, onChange }) => {
               </div>
             </div>
           
-          <div ref={listRef} className="max-h-[300px] overflow-y-auto [scrollbar-width:thin] space-y-1 px-1 pb-1">
+          <div ref={listRef} className="max-h-[140px] overflow-y-auto [scrollbar-width:thin] space-y-0.5 px-1 pb-1 sm:max-h-[300px] sm:space-y-1">
             {filteredModels.length === 0 ? (
               <div className="py-6 text-center text-[12.5px] text-zinc-500">
                 No models found matching "{searchQuery}"
@@ -2718,7 +2735,7 @@ const MCQComposer = ({ onSubmitText, onUpload, sendOnEnter }) => {  const [text,
               <button
                 data-testid="upload-button"
                 onClick={() => fileRef.current?.click()}
-                className="inline-flex items-center gap-2 rounded-lg border border-zinc-200 bg-white px-3 py-1.5 text-[13px] font-medium text-zinc-700 transition hover:border-zinc-400 hover:bg-zinc-50 hover:text-black"
+                className="inline-flex items-center gap-1.5 rounded-lg border border-zinc-200 bg-white px-2 py-1.5 text-[13px] font-medium text-zinc-700 transition hover:border-zinc-400 hover:bg-zinc-50 hover:text-black sm:gap-2 sm:px-3"
               >
                 <Upload className="h-[15px] w-[15px]" />
                 <span className="hidden sm:inline">Upload</span>
@@ -2737,13 +2754,14 @@ const MCQComposer = ({ onSubmitText, onUpload, sendOnEnter }) => {  const [text,
               onClick={handleSubmit}
               disabled={text.trim().length === 0}
               className={cn(
-                "inline-flex items-center gap-2 rounded-lg px-3.5 py-1.5 text-[13px] font-semibold transition-all duration-200",
+                "inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-[13px] font-semibold transition-all duration-200 sm:gap-2 sm:px-3.5",
                 text.trim().length === 0
                   ? "cursor-not-allowed bg-zinc-100 text-zinc-400"
                   : "bg-black text-white shadow-[0_0_0_1px_rgba(0,0,0,0.1)] hover:bg-zinc-800 active:scale-[0.97]"
               )}
             >
-              <span>Generate{aiAutoCount ? "" : ` ${count}`} MCQ{aiAutoCount || count !== 1 ? "s" : ""}</span>
+              <span className="hidden sm:inline">Generate{aiAutoCount ? "" : ` ${count}`} MCQ{aiAutoCount || count !== 1 ? "s" : ""}</span>
+              <span className="sm:hidden">{aiAutoCount ? "Gen" : count}</span>
               <ArrowUp className="h-[15px] w-[15px]" />
             </button>
           </div>
@@ -2792,11 +2810,11 @@ const DraggableComposer = ({ children }) => {
     isDragging.current = true;
     dragStart.current = { x: clientX, y: clientY };
     
-    // Switch from fixed center to fixed top-left if not moved yet
+    // Switch from absolute center to fixed top-left if not moved yet
     if (!pos) {
       const rect = wrapperRef.current.getBoundingClientRect();
-      posStart.current = { x: rect.left, y: rect.top };
-      setPos({ x: rect.left, y: rect.top });
+      posStart.current = { x: rect.left, y: rect.top, w: rect.width };
+      setPos({ x: rect.left, y: rect.top, w: rect.width });
     } else {
       posStart.current = { ...pos };
     }
@@ -2813,10 +2831,12 @@ const DraggableComposer = ({ children }) => {
     let newX = posStart.current.x + dx;
     let newY = posStart.current.y + dy;
     
-    newX = Math.max(0, Math.min(window.innerWidth - rect.width, newX));
+    // Use the captured width to properly clamp the right edge
+    const boxWidth = posStart.current.w || rect.width;
+    newX = Math.max(0, Math.min(window.innerWidth - boxWidth, newX));
     newY = Math.max(0, Math.min(window.innerHeight - rect.height, newY));
     
-    setPos({ x: newX, y: newY });
+    setPos({ x: newX, y: newY, w: boxWidth });
   };
 
   // --- Mouse Events ---
@@ -2862,11 +2882,11 @@ const DraggableComposer = ({ children }) => {
     <div 
       ref={wrapperRef}
       className={cn(
-        "z-20 flex flex-col items-center pointer-events-none",
-        pos ? "fixed left-0 top-0" : "fixed bottom-6 left-1/2 -translate-x-1/2 w-full",
+        "z-50 flex flex-col items-center pointer-events-none",
+        pos ? "fixed left-0 top-0" : "absolute bottom-6 left-1/2 -translate-x-1/2 w-full",
         (!isDragging.current || isTransitioning) && "transition-[transform,max-width,opacity] duration-500 ease-[cubic-bezier(0.23,1,0.32,1)]"
       )}
-      style={pos ? { transform: `translate(${pos.x}px, ${pos.y}px)` } : {}}
+      style={pos ? { transform: `translate(${pos.x}px, ${pos.y}px)`, width: `${pos.w}px` } : {}}
     >
       {/* Drag Handle & Unique Minimal Logo */}
       <div 
@@ -2886,7 +2906,7 @@ const DraggableComposer = ({ children }) => {
 
       {/* Content Wrapper */}
       <div className={cn(
-        "w-full transition-all duration-500 origin-top ease-[cubic-bezier(0.23,1,0.32,1)] px-4 sm:px-6",
+        "relative z-30 w-full transition-all duration-500 origin-top ease-[cubic-bezier(0.23,1,0.32,1)] px-4 sm:px-6",
         isCollapsed ? "max-h-0 opacity-0 scale-90 pointer-events-none" : "max-h-[800px] opacity-100 scale-100 pointer-events-auto max-w-3xl"
       )}>
         <div className={cn("mx-auto w-full", isCollapsed ? "w-[100px]" : "w-full")}>
@@ -2944,11 +2964,11 @@ const ChatComposer = ({ models, onSend, model, onModelChange, sendOnEnter, disab
     if (picked.length === 0) return;
     // Hard cap 4 attachments, total 20MB
     const MAX_FILES = 4;
-    const MAX_BYTES = 20 * 1024 * 1024;
+    const MAX_BYTES = 50 * 1024 * 1024;
     const merged = [...files, ...picked].slice(0, MAX_FILES);
     const totalBytes = merged.reduce((s, f) => s + (f.size || 0), 0);
     if (totalBytes > MAX_BYTES) {
-      alert("Attachments exceed 20MB total. Please pick smaller files.");
+      alert("Attachments exceed 50MB total. Please pick smaller files.");
       return;
     }
     setFiles(merged);
@@ -3534,29 +3554,61 @@ const CHAT_HEADLINES = [
 const ChatHero = ({ onPick }) => {
   // Pick a fresh headline on client mount to avoid SSR hydration mismatch
   const [headline, setHeadline] = useState(CHAT_HEADLINES[0]);
+  const [mounted, setMounted] = useState(false);
   useEffect(() => {
     setHeadline(CHAT_HEADLINES[Math.floor(Math.random() * CHAT_HEADLINES.length)]);
+    setMounted(true);
   }, []);
   const prompts = [
-    "Explain quantum entanglement simply",
-    "Help me draft an email to my professor",
-    "Debug this JavaScript closure issue",
-    "Summarize the key causes of WWII",
+    { text: "Explain quantum entanglement simply", icon: Sparkles },
+    { text: "Help me draft an email to my professor", icon: FileText },
+    { text: "Debug this JavaScript closure issue", icon: Code },
+    { text: "Summarize the key causes of WWII", icon: BookOpen },
   ];
   return (
-    <div className="mx-auto w-full max-w-3xl px-5 py-8 text-center sm:px-6">
-      <QuasarLogo className="mx-auto mb-6 h-14 w-14 text-black drop-shadow-lg" />
-      <h1 className="mx-auto max-w-2xl text-[28px] font-semibold leading-[1.15] tracking-tight text-black sm:text-4xl md:text-5xl">
+    <div className="mx-auto flex w-full max-w-3xl flex-col items-center px-5 py-6 text-center sm:px-6 sm:py-10">
+      {/* Animated logo with pulse */}
+      <div className={cn("relative mb-5 transition-all duration-700 sm:mb-7", mounted ? "opacity-100 translate-y-0" : "opacity-0 translate-y-3")}>
+        <div className="absolute -inset-4 rounded-full bg-gradient-to-br from-zinc-200/40 via-transparent to-zinc-200/40 blur-2xl" />
+        <QuasarLogo className="relative mx-auto h-11 w-11 text-black drop-shadow-lg sm:h-14 sm:w-14" />
+      </div>
+
+      {/* Headline with gradient shimmer */}
+      <h1
+        className={cn(
+          "mx-auto max-w-2xl text-[24px] font-bold leading-[1.1] tracking-tight sm:text-4xl md:text-[44px]",
+          "bg-gradient-to-r from-zinc-900 via-zinc-600 to-zinc-900 bg-[length:200%_auto] bg-clip-text text-transparent",
+          mounted ? "animate-[sa-hero-gradient_4s_ease-in-out_infinite]" : ""
+        )}
+        style={{ fontFamily: "'Manrope', system-ui, sans-serif" }}
+      >
         {headline}
       </h1>
-      <div className="mt-8 flex flex-wrap justify-center gap-2 md:mt-10">
-        {prompts.map((p) => (
+
+      {/* Subtitle */}
+      <p className={cn(
+        "mt-2 text-[13px] text-zinc-500 transition-all duration-700 delay-200 sm:mt-3 sm:text-[14px]",
+        mounted ? "opacity-100 translate-y-0" : "opacity-0 translate-y-2"
+      )}>
+        Pick a prompt below, or type your own
+      </p>
+
+      {/* Prompt pills — two-column grid on mobile, flex-wrap on desktop */}
+      <div className={cn(
+        "mt-6 grid w-full grid-cols-1 gap-2 xs:grid-cols-2 sm:mt-8 sm:flex sm:flex-wrap sm:justify-center sm:gap-2.5",
+        "transition-all duration-700 delay-300",
+        mounted ? "opacity-100 translate-y-0" : "opacity-0 translate-y-4"
+      )}>
+        {prompts.map(({ text: p, icon: Icon }) => (
           <button
             key={p}
             onClick={() => onPick(p)}
-            className="rounded-full border border-zinc-200 bg-white px-3.5 py-1.5 text-[12.5px] text-zinc-700 transition hover:-translate-y-0.5 hover:border-zinc-400 hover:bg-zinc-50 hover:text-black"
+            className="group flex items-center gap-2 rounded-xl border border-zinc-200 bg-white px-3 py-2.5 text-left text-[12.5px] text-zinc-700 transition-all duration-200 hover:-translate-y-0.5 hover:border-zinc-400 hover:bg-zinc-50 hover:text-black hover:shadow-sm sm:rounded-full sm:px-4 sm:py-2"
           >
-            {p}
+            <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-lg bg-zinc-100 text-zinc-600 transition-colors group-hover:bg-black group-hover:text-white sm:h-5 sm:w-5 sm:rounded-md">
+              <Icon className="h-3 w-3" />
+            </span>
+            <span className="min-w-0 flex-1 sm:flex-initial">{p}</span>
           </button>
         ))}
       </div>
@@ -3642,6 +3694,7 @@ const truncateTitle = (text, max = 50) => {
 
 /* ---------------- Root ---------------- */
 export default function StudyAssistant() {
+  const router = useRouter();
   // Auth state
   const [authUser, setAuthUser] = useState(null);
   const [authLoading, setAuthLoading] = useState(true);
@@ -3897,7 +3950,15 @@ export default function StudyAssistant() {
 
     // Compose prompt with generation hints
     const hints = [];
-    if (p.complexity) hints.push(`Complexity level: ${p.complexity}.`);
+    if (p.complexity) {
+      const complexityPrompts = {
+        recall: "Focus on testing basic factual recall and definitions.",
+        apply: "Focus on testing the practical application of concepts using scenarios or worked examples.",
+        analyze: "Focus on analytical thinking, requiring the user to break down information and compare ideas.",
+        mastery: "Focus on expert-level mastery, requiring multi-step reasoning, critical synthesis, and complex problem solving."
+      };
+      hints.push(`Complexity rules: ${complexityPrompts[p.complexity] || p.complexity}`);
+    }
     if (p.aiAutoCount) hints.push("Pick the optimal number of questions yourself.");
     else if (p.count) hints.push(`Generate exactly ${p.count} MCQs.`);
     const hintLine = hints.length > 0 ? `\n\n[${hints.join(" ")}]` : "";
@@ -3952,10 +4013,17 @@ export default function StudyAssistant() {
         return;
       }
 
-      setQuestions(quiz);
-      setAnswers({});
+      if (quiz && quiz.length > 0 && data.id) {
+        setMcqLoading(false);
+        router.push(`/mcq/${data.id}`);
+        return;
+      }
+
+      setMcqError({
+        kind: "generic",
+        message: "The backend generated a quiz but did not return a valid ID to navigate to."
+      });
       setMcqLoading(false);
-      refreshHistory();
     } catch (err) {
       setMcqError({
         kind: "generic",
@@ -4356,8 +4424,7 @@ export default function StudyAssistant() {
         setMessages(loaded);
       }
     } else {
-      setQuestions(DUMMY_QUIZ);
-      setAnswers({});
+      router.push(`/mcq/${id}`);
     }
     if (isMobile()) setSidebarOpen(false);
   };
@@ -4365,17 +4432,15 @@ export default function StudyAssistant() {
   // Delete a recent item (chat or MCQ depending on section).
   // If we're deleting the currently-open one, also clear its main-pane state.
   const handleDelete = async (id) => {
-    // Delete from server
-    await apiDeleteConversation(id);
-
     if (section === "chat") {
+      await apiDeleteConversation(id);
       setRecentChats((prev) => prev.filter((c) => c.id !== id));
+      if (activeId === id) handleResetChat();
     } else {
+      // Quizzes should have their own delete API, for now we will just hide them from UI if we can't delete
+      // To properly delete quizzes: fetch(`/api/quiz/${id}`, { method: "DELETE" })
       setRecentMCQ((prev) => prev.filter((c) => c.id !== id));
-    }
-    if (activeId === id) {
-      if (section === "chat") handleResetChat();
-      else handleResetQuiz();
+      if (activeId === id) handleResetQuiz();
     }
   };
 
@@ -4427,7 +4492,7 @@ export default function StudyAssistant() {
         />
       </div>
 
-      <div className="relative z-10 flex h-screen w-full">
+      <div className="relative flex h-screen w-full">
         <Sidebar
           open={sidebarOpen}
           onToggle={() => setSidebarOpen((v) => !v)}
@@ -4572,18 +4637,6 @@ export default function StudyAssistant() {
                         </div>
                       </div>
                     </div>
-                  </div>
-                )}
-                {hasQuiz && !mcqLoading && (
-                  <div className="pt-20 pb-48">
-                    <QuizView
-                      questions={questions}
-                      answers={answers}
-                      onAnswer={handleAnswer}
-                      onReset={handleResetQuiz}
-                      onRetry={handleRetryQuiz}
-                      title={activeQuizTitle || "Quiz session"}
-                    />
                   </div>
                 )}
               </>

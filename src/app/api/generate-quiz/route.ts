@@ -34,7 +34,7 @@ export async function POST(req: Request) {
     }
 
     const promptText = `Based on the following context, create a multiple-choice quiz.
-You MUST return ONLY a valid JSON array of exactly 3 objects. Do not include markdown wrappers like \`\`\`json.
+You MUST return ONLY a valid JSON array of objects. Do not include markdown wrappers like \`\`\`json.
 Structure:
 [
   {

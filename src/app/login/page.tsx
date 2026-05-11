@@ -47,28 +47,9 @@ const GoogleGlyph = ({ className = "h-[18px] w-[18px]" }) => (
   </svg>
 );
 
-/* Quasar AI brand logo — vector. Uses currentColor so it adapts to
-   surrounding text color. */
-const QuasarLogo = ({ className = "", strokeWidth = 3.8 }) => (
-  <svg
-    viewBox="0 0 64 64"
-    fill="none"
-    xmlns="http://www.w3.org/2000/svg"
-    className={className}
-    aria-hidden="true"
-  >
-    <circle cx="27" cy="30" r="20" stroke="currentColor" strokeWidth={strokeWidth} />
-    <path
-      d="M27 13.5 C27 23.5 28 26 36 30 C28 34 27 36.5 27 46.5 C27 36.5 26 34 18 30 C26 26 27 23.5 27 13.5 Z"
-      fill="currentColor"
-    />
-    <path
-      d="M36.5 39 L52 54.5"
-      stroke="currentColor"
-      strokeWidth={strokeWidth + 0.6}
-      strokeLinecap="round"
-    />
-  </svg>
+/* Study Buddy brand logo — uses the new brand image */
+const QuasarLogo = ({ className = "" }: { className?: string; strokeWidth?: number }) => (
+  <img src="/study-buddy-logo.svg" alt="Study Buddy" className={className} style={{ objectFit: "contain" }} />
 );
 
 /* ---------------- Wordmark ---------------- */
@@ -84,7 +65,7 @@ const WordMark = ({ onDark = true, className = "" }) => (
       )}
       style={{ fontFamily: "'Manrope', system-ui, sans-serif" }}
     >
-      Quasar AI
+      Study Buddy
     </span>
   </div>
 );

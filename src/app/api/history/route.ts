@@ -12,7 +12,6 @@ export async function GET() {
     const history = await prisma.quiz.findMany({
       where: {
         userId: session.user.id,
-        isSaved: true,
       },
       select: {
         id: true,

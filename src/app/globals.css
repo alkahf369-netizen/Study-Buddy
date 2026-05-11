@@ -212,6 +212,9 @@ code {
   line-height: 1.75;
   font-size: 14.5px;
   color: #27272a;
+  overflow-wrap: break-word;
+  word-break: break-word;
+  min-width: 0;
 }
 
 /* Headings */
@@ -329,14 +332,21 @@ code {
 }
 
 /* Tables */
+.sa-table-wrap {
+  width: 100%;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  margin: 0.75em 0;
+  border-radius: 8px;
+  border: 1px solid #e4e4e7;
+}
+
 .sa-markdown table {
   width: 100%;
+  min-width: 480px;
   border-collapse: collapse;
-  margin: 0.75em 0;
-  font-size: 0.9em;
-  border-radius: 8px;
+  font-size: 0.85em;
   overflow: hidden;
-  border: 1px solid #e4e4e7;
 }
 
 .sa-markdown th {

@@ -205,31 +205,9 @@ const useT = () => (path) =>
   path.split(".").reduce((o, k) => (o == null ? o : o[k]), TRANSLATIONS.en);
 
 /* ---------------- shared bits ---------------- */
-/* Quasar AI brand logo — vector. Uses currentColor so it adapts to
-   surrounding text color. Closely matches the official wordmark. */
-const QuasarLogo = ({ className = "", strokeWidth = 3.5 }) => (
-  <svg
-    viewBox="0 0 64 64"
-    fill="none"
-    xmlns="http://www.w3.org/2000/svg"
-    className={className}
-    aria-hidden="true"
-  >
-    {/* Open Q ring */}
-    <circle cx="27" cy="30" r="20" stroke="currentColor" strokeWidth={strokeWidth} />
-    {/* 4-point sparkle (concave-sided diamond) */}
-    <path
-      d="M27 13.5 C27 23.5 28 26 36 30 C28 34 27 36.5 27 46.5 C27 36.5 26 34 18 30 C26 26 27 23.5 27 13.5 Z"
-      fill="currentColor"
-    />
-    {/* Q tail */}
-    <path
-      d="M36.5 39 L52 54.5"
-      stroke="currentColor"
-      strokeWidth={strokeWidth + 0.6}
-      strokeLinecap="round"
-    />
-  </svg>
+/* Study Buddy brand logo — uses the new brand image */
+const QuasarLogo = ({ className = "" }: { className?: string; strokeWidth?: number }) => (
+  <img src="/study-buddy-logo.svg" alt="Study Buddy" className={className} style={{ objectFit: "contain" }} />
 );
 
 const WordMark = ({ onDark = true, size = "md" }) => {
@@ -251,7 +229,7 @@ const WordMark = ({ onDark = true, size = "md" }) => {
         )}
         style={{ fontFamily: "'Manrope', system-ui, sans-serif" }}
       >
-        Quasar AI
+        Study Buddy
       </span>
     </div>
   );
@@ -1285,7 +1263,7 @@ const Footer = () => {
       </div>
 
       <div className="mt-12 flex flex-col items-center justify-between gap-3 border-t border-white/10 pt-6 text-[11.5px] text-white/45 md:flex-row">
-        <span className="text-center md:text-left">© {new Date().getFullYear()} Quasar AI. {t("footer.copyright")}</span>
+        <span className="text-center md:text-left">© {new Date().getFullYear()} Study Buddy. {t("footer.copyright")}</span>
         <span className="inline-flex items-center gap-4">
           <a href="#" className="transition hover:text-white">
             {t("footer.terms")}

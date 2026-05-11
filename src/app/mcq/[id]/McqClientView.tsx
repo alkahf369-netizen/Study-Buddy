@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useState, useEffect, useRef } from "react";
-import { Check, X, Target, Lightbulb, Zap, Plus, RefreshCw, Save } from "lucide-react";
+import { Check, X, Target, Lightbulb, Zap, RefreshCw } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useRouter } from "next/navigation";
 
@@ -159,18 +159,13 @@ const MCQCard = ({ q, index, selected, onSelect }: any) => {
 };
 
 /* ---------------- Quiz Result Component ---------------- */
-const QuizResult = ({ correct, total, onRetry, onClose, title, quizId, initialIsSaved, isLoggedIn }: any) => {
+const QuizResult = ({ correct, total, onRetry, onClose, title }: any) => {
   const pct = total > 0 ? Math.round((correct / total) * 100) : 0;
   const { grade, remark } = gradeFor(pct);
   const dateStr = new Date().toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" });
   
   const [compare, setCompare] = useState<any>(null);
   const persistedRef = useRef(false);
-
-  // Save UI state
-  const [isSaved, setIsSaved] = useState(initialIsSaved);
-  const [saveTitle, setSaveTitle] = useState(title);
-  const [isSaving, setIsSaving] = useState(false);
 
   useEffect(() => {
     if (persistedRef.current) return;
@@ -203,33 +198,13 @@ const QuizResult = ({ correct, total, onRetry, onClose, title, quizId, initialIs
     saveBestScores(all);
   }, [correct, title, total, pct, grade]);
 
-  const handleSave = async () => {
-    if (!isLoggedIn) {
-      alert("Please log in to save exams.");
-      return;
-    }
-    setIsSaving(true);
-    try {
-      const res = await fetch(`/api/quiz/${quizId}/save`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ title: saveTitle }),
-      });
-      if (res.ok) setIsSaved(true);
-      else alert("Failed to save quiz");
-    } catch (e) {
-      alert("Error saving quiz");
-    }
-    setIsSaving(false);
-  };
-
   return (
     <div className="relative mb-5 overflow-hidden rounded-2xl border p-5 sm:p-7" style={{ background: "linear-gradient(180deg, #fbf4de 0%, #f4ead0 60%, #eeddb6 100%)", borderColor: "#c7ad78", boxShadow: "inset 0 1px 0 rgba(255,255,255,0.7), 0 1px 2px rgba(90,60,20,0.06), 0 10px 28px rgba(120,85,30,0.12)" }}>
       <div aria-hidden="true" className="pointer-events-none absolute inset-0 opacity-[0.35]" style={{ backgroundImage: "repeating-linear-gradient(to bottom, transparent 0, transparent 27px, rgba(139,101,45,0.18) 27px, rgba(139,101,45,0.18) 28px)" }} />
       <div aria-hidden="true" className="pointer-events-none absolute inset-y-0 left-0 w-8" style={{ background: "linear-gradient(90deg, rgba(139,101,45,0.10), transparent)" }} />
 
       {compare?.status === "new-best" && (
-        <div className="sa-stamp-in pointer-events-none absolute right-3 top-3 z-10 sm:right-4 sm:top-4">
+        <div className="sa-stamp-in pointer-events-none absolute right-3 bottom-3 z-10 sm:right-4 sm:bottom-4">
           <div className="flex flex-col items-center justify-center rounded-full px-3 py-2 text-center" style={{ border: `2.5px solid ${RED_PEN}`, color: RED_PEN, background: "rgba(255,249,220,0.92)", fontFamily: HAND_FONT, fontWeight: 700, lineHeight: 1, boxShadow: "0 4px 12px rgba(196,42,48,0.22)" }}>
             <span style={{ fontSize: "11px", letterSpacing: "0.1em" }}>★ NEW ★</span>
             <span style={{ fontSize: "18px", marginTop: 2 }}>BEST!</span>
@@ -275,41 +250,12 @@ const QuizResult = ({ correct, total, onRetry, onClose, title, quizId, initialIs
           <p className="mt-4 leading-snug" style={{ color: RED_PEN, fontFamily: HAND_FONT, fontWeight: 600, fontSize: "19px", transform: "rotate(-0.8deg)", transformOrigin: "left center", display: "inline-block" }}>{remark}</p>
         </div>
       </div>
-
-      {/* Save Exam Section */}
-      <div className="mt-8 pt-6 border-t border-[#c7ad78]/40 relative">
-        <h4 className="text-[14px] font-semibold text-[#6b5434] mb-3">Save Exam to Profile</h4>
-        <div className="flex flex-col sm:flex-row gap-3">
-          <input
-            type="text"
-            value={saveTitle}
-            onChange={(e) => setSaveTitle(e.target.value)}
-            disabled={isSaved || isSaving}
-            className="flex-1 rounded-lg border border-[#c7ad78] bg-white/70 px-3 py-2 text-[14px] text-[#2a2218] outline-none transition focus:bg-white focus:ring-2 focus:ring-[#c7ad78]/50 disabled:opacity-60"
-            placeholder="Name this exam (e.g. History Midterm)"
-          />
-          <button
-            onClick={handleSave}
-            disabled={isSaved || isSaving}
-            className={cn(
-              "inline-flex items-center justify-center gap-2 rounded-lg px-4 py-2 text-[14px] font-semibold transition-all",
-              isSaved
-                ? "bg-[#8a7348] text-white opacity-90"
-                : "bg-black text-white hover:bg-[#2a2218] shadow-[0_4px_10px_rgba(0,0,0,0.15)]"
-            )}
-          >
-            {isSaved ? <Check className="h-4 w-4" /> : <Save className="h-4 w-4" />}
-            {isSaving ? "Saving..." : isSaved ? "Saved" : "Save Exam"}
-          </button>
-        </div>
-        {!isLoggedIn && <p className="mt-2 text-[12px] text-red-600 font-medium">You must be logged in to save exams.</p>}
-      </div>
     </div>
   );
 };
 
 /* ---------------- Main Client View ---------------- */
-export default function McqClientView({ initialQuiz, isSaved: initialIsSaved, isLoggedIn }: any) {
+export default function McqClientView({ initialQuiz }: any) {
   const router = useRouter();
   const questions = initialQuiz.questions;
   const total = questions.length;
@@ -426,9 +372,6 @@ export default function McqClientView({ initialQuiz, isSaved: initialIsSaved, is
               onRetry={() => { setResultOpen(false); handleReset(); }}
               onClose={() => setResultOpen(false)}
               title={initialQuiz.title}
-              quizId={initialQuiz.id}
-              initialIsSaved={initialIsSaved}
-              isLoggedIn={isLoggedIn}
             />
           </div>
         </div>

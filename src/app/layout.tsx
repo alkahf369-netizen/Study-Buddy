@@ -19,7 +19,7 @@ const manrope = Manrope({
 });
 
 export const metadata: Metadata = {
-  title: "Quasar AI — Your Intelligent Study Companion",
+  title: "Study Buddy — Your Intelligent Study Companion",
   description: "AI-powered study assistant with chat, MCQ generation, and multiple AI models",
 };
 

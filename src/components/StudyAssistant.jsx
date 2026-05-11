@@ -1,4 +1,5 @@
 import React, { useState, useRef, useEffect, useCallback, useMemo } from "react";
+import { createPortal } from "react-dom";
 import { useRouter } from "next/navigation";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -54,13 +55,9 @@ import {
   BookOpen,
 } from "lucide-react";
 
-/* Quasar AI Logo — Q with sparkle star (inline SVG, uses currentColor) */
+/* Study Buddy Logo — uses the new brand image */
 const QuasarLogo = ({ className = "h-8 w-8" }) => (
-  <svg viewBox="0 0 120 120" fill="none" className={className} aria-hidden="true">
-    <circle cx="52" cy="52" r="28" stroke="currentColor" strokeWidth="5.5" fill="none"/>
-    <line x1="72" y1="72" x2="105" y2="105" stroke="currentColor" strokeWidth="5.5" strokeLinecap="round"/>
-    <path d="M52,32 Q54.5,47 67,52 Q54.5,57 52,72 Q49.5,57 37,52 Q49.5,47 52,32Z" fill="currentColor"/>
-  </svg>
+  <img src="/study-buddy-logo.svg" alt="Study Buddy" className={className} style={{ objectFit: "contain" }} />
 );
 
 /* Generic monogram glyph used as a placeholder mark (not a brand reproduction) */
@@ -216,13 +213,42 @@ is the source of truth for what gets generated.
 
 const ComplexityPicker = ({ value, onChange }) => {
   const [open, setOpen] = useState(false);
+  const [mounted, setMounted] = useState(false);
+  const [isMobile, setIsMobile] = useState(false);
+  const [triggerRect, setTriggerRect] = useState(null);
   const ref = useRef(null);
+  const dropdownRef = useRef(null);
   const current = COMPLEXITY_LEVELS.find((l) => l.id === value) || COMPLEXITY_LEVELS[0];
   const CurrentIcon = current.icon;
 
+  useEffect(() => { setMounted(true); }, []);
+
+  useEffect(() => {
+    const updateMobile = () => setIsMobile(window.innerWidth < 640);
+    updateMobile();
+    window.addEventListener("resize", updateMobile);
+    return () => window.removeEventListener("resize", updateMobile);
+  }, []);
+
+  useEffect(() => {
+    if (!open) return;
+    const update = () => {
+      if (ref.current) setTriggerRect(ref.current.getBoundingClientRect());
+    };
+    update();
+    window.addEventListener("resize", update);
+    window.addEventListener("scroll", update, true);
+    return () => {
+      window.removeEventListener("resize", update);
+      window.removeEventListener("scroll", update, true);
+    };
+  }, [open]);
+
   useEffect(() => {
     const handler = (e) => {
-      if (ref.current && !ref.current.contains(e.target)) setOpen(false);
+      const inTrigger = ref.current && ref.current.contains(e.target);
+      const inDropdown = dropdownRef.current && dropdownRef.current.contains(e.target);
+      if (!inTrigger && !inDropdown) setOpen(false);
     };
     document.addEventListener("mousedown", handler);
     return () => document.removeEventListener("mousedown", handler);
@@ -233,29 +259,46 @@ const ComplexityPicker = ({ value, onChange }) => {
       <button
         data-testid="complexity-trigger"
         onClick={() => setOpen((v) => !v)}
-        className="inline-flex items-center gap-1.5 rounded-lg border border-zinc-200 bg-white px-2 py-1.5 text-[13px] font-medium text-zinc-800 transition hover:border-zinc-400 hover:bg-zinc-50 sm:gap-2 sm:px-3"
+        aria-label={`Complexity: ${current.label}`}
+        className="inline-flex shrink-0 items-center gap-1 rounded-lg border border-zinc-200 bg-white px-1.5 py-1.5 text-[13px] font-medium text-zinc-800 transition hover:border-zinc-400 hover:bg-zinc-50 sm:gap-2 sm:px-3"
       >
-        <span className="flex h-5 w-5 items-center justify-center rounded-md bg-black text-white ring-1 ring-black/10">
+        <span className="flex h-[18px] w-[18px] items-center justify-center rounded-md bg-black text-white ring-1 ring-black/10 sm:h-5 sm:w-5">
           <CurrentIcon className="h-3 w-3" />
         </span>
         <span className="hidden sm:inline">{current.label}</span>
         <ChevronDown
           className={cn(
-            "h-[14px] w-[14px] text-zinc-500 transition-transform",
+            "h-[12px] w-[12px] text-zinc-500 transition-transform sm:h-[14px] sm:w-[14px]",
             open && "rotate-180"
           )}
         />
       </button>
 
-      {open && (
+      {open && mounted && createPortal(
         <>
-          <div 
-            className="fixed inset-0 z-[100] bg-black/20 backdrop-blur-sm sm:hidden" 
+          <div
+            className="fixed inset-0 z-[100] bg-black/20 backdrop-blur-sm sm:bg-transparent sm:backdrop-blur-0"
             onClick={(e) => { e.stopPropagation(); setOpen(false); }}
           />
           <div
+            ref={dropdownRef}
             data-testid="complexity-dropdown"
-            className="fixed left-1/2 top-1/2 z-[101] w-[280px] -translate-x-1/2 -translate-y-1/2 rounded-xl border border-zinc-200 bg-white p-1.5 shadow-2xl sm:absolute sm:bottom-full sm:left-0 sm:top-auto sm:mb-2 sm:w-[300px] sm:-translate-x-0 sm:-translate-y-0 sm:origin-bottom-left sm:shadow-[0_12px_40px_rgba(17,24,39,0.12)]"
+            className="fixed z-[101] rounded-xl border border-zinc-200 bg-white p-1.5 shadow-2xl sm:shadow-[0_12px_40px_rgba(17,24,39,0.12)]"
+            style={
+              isMobile || !triggerRect
+                ? {
+                    left: "50%",
+                    top: "50%",
+                    transform: "translate(-50%, -50%)",
+                    width: "min(92vw, 300px)",
+                  }
+                : {
+                    left: triggerRect.left,
+                    top: triggerRect.top - 8,
+                    width: 300,
+                    transform: "translateY(-100%)",
+                  }
+            }
           >
           <div className="px-3 pb-1 pt-2 text-[10px] font-semibold uppercase tracking-wider text-zinc-500">
             Complexity
@@ -306,7 +349,8 @@ const ComplexityPicker = ({ value, onChange }) => {
             );
           })}
         </div>
-        </>
+        </>,
+        document.body
       )}
     </div>
   );
@@ -317,7 +361,7 @@ const CountStepper = ({ value, onChange, aiAuto, onToggleAiAuto, min = 1, max = 
   const inc = () => onChange(Math.min(max, value + 1));
 
   return (
-    <div className="inline-flex items-stretch overflow-hidden rounded-lg border border-zinc-200 bg-white">
+    <div className="inline-flex shrink-0 items-stretch overflow-hidden rounded-lg border border-zinc-200 bg-white">
       {/* AI Auto pill (left segment) */}
       <button
         data-testid="ai-auto-toggle"
@@ -327,14 +371,15 @@ const CountStepper = ({ value, onChange, aiAuto, onToggleAiAuto, min = 1, max = 
             ? "AI decides the optimal number of questions"
             : "Let AI decide the number of questions"
         }
+        aria-label={aiAuto ? "Disable auto count" : "Let AI decide count"}
         className={cn(
-          "flex items-center gap-1.5 px-2.5 text-[12px] font-semibold transition-colors sm:px-3",
+          "flex items-center gap-1 px-1.5 text-[12px] font-semibold transition-colors sm:gap-1.5 sm:px-3",
           aiAuto
             ? "bg-black text-white"
             : "text-zinc-600 hover:bg-zinc-50 hover:text-black"
         )}
       >
-        <Wand2 className="h-[13px] w-[13px]" />
+        <Wand2 className="h-[12px] w-[12px] sm:h-[13px] sm:w-[13px]" />
         <span className="hidden sm:inline">Auto</span>
       </button>
 
@@ -351,14 +396,14 @@ const CountStepper = ({ value, onChange, aiAuto, onToggleAiAuto, min = 1, max = 
           data-testid="count-dec"
           onClick={dec}
           disabled={aiAuto || value <= min}
-          className="flex h-full w-7 items-center justify-center text-zinc-600 transition hover:bg-zinc-50 hover:text-black disabled:cursor-not-allowed disabled:opacity-40 sm:w-8"
+          className="flex h-full w-6 items-center justify-center text-zinc-600 transition hover:bg-zinc-50 hover:text-black disabled:cursor-not-allowed disabled:opacity-40 sm:w-8"
           aria-label="Decrease"
         >
-          <Minus className="h-[13px] w-[13px]" />
+          <Minus className="h-[12px] w-[12px] sm:h-[13px] sm:w-[13px]" />
         </button>
         <span
           data-testid="count-value"
-          className="flex min-w-[28px] items-center justify-center px-1 text-[13px] font-semibold tabular-nums text-black sm:min-w-[36px]"
+          className="flex min-w-[22px] items-center justify-center text-[12.5px] font-semibold tabular-nums text-black sm:min-w-[36px] sm:px-1 sm:text-[13px]"
         >
           {aiAuto ? "—" : value}
         </span>
@@ -366,10 +411,10 @@ const CountStepper = ({ value, onChange, aiAuto, onToggleAiAuto, min = 1, max = 
           data-testid="count-inc"
           onClick={inc}
           disabled={aiAuto || value >= max}
-          className="flex h-full w-7 items-center justify-center text-zinc-600 transition hover:bg-zinc-50 hover:text-black disabled:cursor-not-allowed disabled:opacity-40 sm:w-8"
+          className="flex h-full w-6 items-center justify-center text-zinc-600 transition hover:bg-zinc-50 hover:text-black disabled:cursor-not-allowed disabled:opacity-40 sm:w-8"
           aria-label="Increase"
         >
-          <Plus className="h-[13px] w-[13px]" />
+          <Plus className="h-[12px] w-[12px] sm:h-[13px] sm:w-[13px]" />
         </button>
       </div>
     </div>
@@ -704,9 +749,38 @@ const ModelSwitcher = ({ models, value, onChange }) => {
   const [searchQuery, setSearchQuery] = useState("");
   const [focusedIndex, setFocusedIndex] = useState(0);
   const [selectedProvider, setSelectedProvider] = useState("All");
+  const [mounted, setMounted] = useState(false);
+  const [isMobile, setIsMobile] = useState(false);
+  const [triggerRect, setTriggerRect] = useState(null);
   const ref = useRef(null);
+  const dropdownRef = useRef(null);
   const listRef = useRef(null);
   const current = value ? models.find((m) => m.id === value) : null;
+
+  useEffect(() => { setMounted(true); }, []);
+
+  // Track viewport size for mobile vs desktop positioning
+  useEffect(() => {
+    const updateMobile = () => setIsMobile(window.innerWidth < 640);
+    updateMobile();
+    window.addEventListener("resize", updateMobile);
+    return () => window.removeEventListener("resize", updateMobile);
+  }, []);
+
+  // Capture the trigger's position whenever the dropdown is opened or viewport changes
+  useEffect(() => {
+    if (!open) return;
+    const update = () => {
+      if (ref.current) setTriggerRect(ref.current.getBoundingClientRect());
+    };
+    update();
+    window.addEventListener("resize", update);
+    window.addEventListener("scroll", update, true);
+    return () => {
+      window.removeEventListener("resize", update);
+      window.removeEventListener("scroll", update, true);
+    };
+  }, [open]);
 
   const mainBrands = useMemo(() => ['ChatGPT', 'Claude', 'Gemini', 'Deepseek', 'Kimi', 'Grok'], []);
 
@@ -735,7 +809,9 @@ const ModelSwitcher = ({ models, value, onChange }) => {
 
   useEffect(() => {
     const handler = (e) => {
-      if (ref.current && !ref.current.contains(e.target)) setOpen(false);
+      const inTrigger = ref.current && ref.current.contains(e.target);
+      const inDropdown = dropdownRef.current && dropdownRef.current.contains(e.target);
+      if (!inTrigger && !inDropdown) setOpen(false);
     };
     document.addEventListener("mousedown", handler);
     return () => document.removeEventListener("mousedown", handler);
@@ -797,11 +873,33 @@ const ModelSwitcher = ({ models, value, onChange }) => {
         />
       </button>
 
-      {open && (
-        <div
-          data-testid="model-dropdown"
-          className="absolute bottom-full left-0 z-50 mb-2 flex w-[260px] h-[220px] origin-bottom-left rounded-xl border border-zinc-200 bg-white shadow-[0_12px_40px_rgba(17,24,39,0.12)] overflow-hidden sm:w-[380px] sm:h-[330px]"
-        >
+      {open && mounted && createPortal(
+        <>
+          <div
+            className="fixed inset-0 z-[100] bg-black/20 backdrop-blur-sm sm:bg-transparent sm:backdrop-blur-0"
+            onClick={(e) => { e.stopPropagation(); setOpen(false); }}
+          />
+          <div
+            ref={dropdownRef}
+            data-testid="model-dropdown"
+            className="fixed z-[101] flex overflow-hidden rounded-xl border border-zinc-200 bg-white shadow-2xl sm:shadow-[0_12px_40px_rgba(17,24,39,0.12)]"
+            style={
+              isMobile || !triggerRect
+                ? {
+                    left: "50%",
+                    top: "50%",
+                    transform: "translate(-50%, -50%)",
+                    width: "min(92vw, 320px)",
+                    height: "min(70vh, 380px)",
+                  }
+                : {
+                    left: triggerRect.left,
+                    top: triggerRect.top - 8 - 330,
+                    width: 380,
+                    height: 330,
+                  }
+            }
+          >
           {/* Left Sidebar - Providers */}
           <div className="flex w-[40px] shrink-0 flex-col items-center gap-1.5 border-r border-zinc-100 bg-zinc-50/50 py-2 [scrollbar-width:none] overflow-y-auto sm:w-[52px] sm:gap-2 sm:py-2.5">
              {mainBrands.map((brand) => {
@@ -927,6 +1025,8 @@ const ModelSwitcher = ({ models, value, onChange }) => {
           </div>
         </div>
         </div>
+        </>,
+        document.body
       )}
     </div>
   );
@@ -1046,8 +1146,8 @@ const SettingsModal = ({
 
       {/* Panel */}
       <div className="relative z-10 flex max-h-[92vh] w-full max-w-[760px] flex-col overflow-hidden rounded-2xl border border-zinc-200 bg-white shadow-[0_30px_80px_rgba(17,24,39,0.18)] sm:flex-row">
-        {/* Tabs — horizontal on mobile, vertical on desktop */}
-        <div className="flex shrink-0 gap-1 border-b border-zinc-200 bg-zinc-50/60 p-2 sm:w-[180px] sm:flex-col sm:gap-0 sm:border-b-0 sm:border-r sm:p-3">
+        {/* Tabs — horizontal scroll on mobile, vertical stack on desktop */}
+        <div className="flex shrink-0 gap-1 overflow-x-auto border-b border-zinc-200 bg-zinc-50/60 p-2 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden sm:w-[180px] sm:flex-col sm:gap-0 sm:overflow-visible sm:border-b-0 sm:border-r sm:p-3">
           <div className="hidden px-2 pt-1 pb-3 text-[11px] font-semibold uppercase tracking-wider text-zinc-500 sm:block">
             Settings
           </div>
@@ -1059,14 +1159,15 @@ const SettingsModal = ({
                 key={t.id}
                 data-testid={`settings-tab-${t.id}`}
                 onClick={() => setTab(t.id)}
+                title={t.label}
                 className={cn(
-                  "flex flex-1 items-center justify-center gap-2 rounded-lg px-3 py-2 text-[13px] font-medium transition-colors sm:flex-none sm:justify-start",
+                  "flex shrink-0 items-center justify-center gap-1.5 whitespace-nowrap rounded-lg px-2.5 py-1.5 text-[12.5px] font-medium transition-colors sm:flex-none sm:justify-start sm:gap-2 sm:px-3 sm:py-2 sm:text-[13px]",
                   active
                     ? "bg-black text-white"
                     : "text-zinc-700 hover:bg-zinc-100 hover:text-black"
                 )}
               >
-                <Icon className="h-[15px] w-[15px]" />
+                <Icon className="h-[14px] w-[14px] shrink-0 sm:h-[15px] sm:w-[15px]" />
                 {t.label}
               </button>
             );
@@ -1074,8 +1175,8 @@ const SettingsModal = ({
         </div>
 
         {/* Content */}
-        <div className="flex min-h-[420px] min-w-0 flex-1 flex-col">
-          <div className="flex items-center justify-between border-b border-zinc-200 px-5 py-3 sm:px-6 sm:py-4">
+        <div className="flex min-h-[360px] min-w-0 flex-1 flex-col sm:min-h-[420px]">
+          <div className="flex items-center justify-between border-b border-zinc-200 px-4 py-3 sm:px-6 sm:py-4">
             <h2 className="text-[15px] font-semibold text-black">
               {SETTINGS_TABS.find((t) => t.id === tab)?.label}
             </h2>
@@ -1089,7 +1190,7 @@ const SettingsModal = ({
             </button>
           </div>
 
-          <div className="flex-1 overflow-y-auto px-5 py-5 sm:px-6">
+          <div className="flex-1 overflow-y-auto px-4 py-4 sm:px-6 sm:py-5">
             {tab === "profile" && (
               <div className="space-y-5">
                 {/* Google Account Card */}
@@ -1542,7 +1643,7 @@ const SettingsModal = ({
             )}
           </div>
 
-          <div className="flex items-center justify-between gap-2 border-t border-zinc-200 px-5 py-3 sm:px-6">
+          <div className="flex items-center justify-between gap-2 border-t border-zinc-200 px-4 py-3 sm:px-6">
             <span
               className={cn(
                 "text-[12px] font-medium transition-opacity",
@@ -1688,7 +1789,7 @@ const Sidebar = ({
             <div className="flex items-center gap-2">
               <QuasarLogo className="h-7 w-7 text-black" />
               <span className="text-[15px] font-bold tracking-tight text-black">
-                Quasar AI
+                Study Buddy
               </span>
             </div>
           )}
@@ -2720,8 +2821,8 @@ const MCQComposer = ({ onSubmitText, onUpload, sendOnEnter }) => {  const [text,
             className="block max-h-[220px] w-full resize-none bg-transparent px-4 pt-3 pb-2 text-[15px] leading-relaxed text-black placeholder:text-zinc-400 outline-none"
           />
 
-          <div className="flex flex-wrap items-center justify-between gap-2 px-2 pb-1 pt-1">
-            <div className="flex flex-wrap items-center gap-1.5">
+          <div className="flex flex-nowrap items-center gap-1 px-1.5 pb-1 pt-1 sm:gap-2 sm:px-2">
+            <div className="flex min-w-0 flex-1 flex-nowrap items-center gap-1 overflow-hidden sm:gap-1.5">
               <input
                 ref={fileRef}
                 type="file"
@@ -2735,9 +2836,10 @@ const MCQComposer = ({ onSubmitText, onUpload, sendOnEnter }) => {  const [text,
               <button
                 data-testid="upload-button"
                 onClick={() => fileRef.current?.click()}
-                className="inline-flex items-center gap-1.5 rounded-lg border border-zinc-200 bg-white px-2 py-1.5 text-[13px] font-medium text-zinc-700 transition hover:border-zinc-400 hover:bg-zinc-50 hover:text-black sm:gap-2 sm:px-3"
+                aria-label="Upload"
+                className="inline-flex shrink-0 items-center gap-1.5 rounded-lg border border-zinc-200 bg-white px-1.5 py-1.5 text-[13px] font-medium text-zinc-700 transition hover:border-zinc-400 hover:bg-zinc-50 hover:text-black sm:gap-2 sm:px-3"
               >
-                <Upload className="h-[15px] w-[15px]" />
+                <Upload className="h-[14px] w-[14px] sm:h-[15px] sm:w-[15px]" />
                 <span className="hidden sm:inline">Upload</span>
               </button>
               <ComplexityPicker value={complexity} onChange={setComplexity} />
@@ -2753,15 +2855,15 @@ const MCQComposer = ({ onSubmitText, onUpload, sendOnEnter }) => {  const [text,
               data-testid="generate-mcq"
               onClick={handleSubmit}
               disabled={text.trim().length === 0}
+              aria-label="Generate MCQs"
               className={cn(
-                "inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-[13px] font-semibold transition-all duration-200 sm:gap-2 sm:px-3.5",
+                "inline-flex shrink-0 items-center gap-1 rounded-lg px-2 py-1.5 text-[13px] font-semibold transition-all duration-200 sm:gap-2 sm:px-3.5",
                 text.trim().length === 0
                   ? "cursor-not-allowed bg-zinc-100 text-zinc-400"
                   : "bg-black text-white shadow-[0_0_0_1px_rgba(0,0,0,0.1)] hover:bg-zinc-800 active:scale-[0.97]"
               )}
             >
               <span className="hidden sm:inline">Generate{aiAutoCount ? "" : ` ${count}`} MCQ{aiAutoCount || count !== 1 ? "s" : ""}</span>
-              <span className="sm:hidden">{aiAutoCount ? "Gen" : count}</span>
               <ArrowUp className="h-[15px] w-[15px]" />
             </button>
           </div>
@@ -2882,7 +2984,7 @@ const DraggableComposer = ({ children }) => {
     <div 
       ref={wrapperRef}
       className={cn(
-        "z-50 flex flex-col items-center pointer-events-none",
+        "z-20 flex flex-col items-center pointer-events-none",
         pos ? "fixed left-0 top-0" : "absolute bottom-6 left-1/2 -translate-x-1/2 w-full",
         (!isDragging.current || isTransitioning) && "transition-[transform,max-width,opacity] duration-500 ease-[cubic-bezier(0.23,1,0.32,1)]"
       )}
@@ -3467,7 +3569,18 @@ const ChatMessage = ({ role, content, modelName, modelProvider, files, quiz, onR
             <div className="whitespace-pre-wrap">{displayContent}</div>
           ) : (
             <div className="sa-markdown">
-              <ReactMarkdown remarkPlugins={[remarkGfm]}>{displayContent}</ReactMarkdown>
+              <ReactMarkdown
+                remarkPlugins={[remarkGfm]}
+                components={{
+                  table: ({ children, ...props }) => (
+                    <div className="sa-table-wrap">
+                      <table {...props}>{children}</table>
+                    </div>
+                  ),
+                }}
+              >
+                {displayContent}
+              </ReactMarkdown>
             </div>
           )
         )}
@@ -3952,10 +4065,10 @@ export default function StudyAssistant() {
     const hints = [];
     if (p.complexity) {
       const complexityPrompts = {
-        recall: "Focus on testing basic factual recall and definitions.",
-        apply: "Focus on testing the practical application of concepts using scenarios or worked examples.",
-        analyze: "Focus on analytical thinking, requiring the user to break down information and compare ideas.",
-        mastery: "Focus on expert-level mastery, requiring multi-step reasoning, critical synthesis, and complex problem solving."
+        recall: "Generate questions that test REMEMBERING and UNDERSTANDING only. Ask students to identify definitions, recall facts, list key terms, recognize correct statements, or match concepts. Questions should have one clearly correct factual answer. Distractors should be plausible but factually wrong. Suitable for: class tests, quick revision checks.",
+        apply: "Generate questions that test APPLICATION of knowledge. Present real-world scenarios, case studies, or practical situations where the student must USE learned concepts to solve a problem or predict an outcome. Each question should require the student to transfer knowledge to a new context — not just recall it. Distractors should represent common mistakes students make when applying the concept incorrectly. Suitable for: mid-term exams, assignment-level thinking.",
+        analyze: "Generate questions that test ANALYSIS and EVALUATION. Require students to break down complex information, compare and contrast ideas, identify cause-effect relationships, distinguish between similar concepts, find patterns, or evaluate the strengths and weaknesses of an argument. Questions should demand multi-step reasoning — the answer should NOT be directly stated in the source material. Include distractors that represent partial analysis or common logical errors. Suitable for: final exams, competitive preparation.",
+        mastery: "Generate RESEARCH-LEVEL questions that test the HIGHEST cognitive abilities: evaluation, synthesis, and creation. Questions should require the student to critically evaluate competing theories, synthesize information from multiple angles, propose novel solutions, or judge the validity of complex arguments. Think like a university professor designing questions for graduate-level comprehensive exams. Each question should be challenging enough that surface-level understanding will fail — only deep, interconnected knowledge of the topic will lead to the correct answer. Distractors should be sophisticated and represent advanced misconceptions. Suitable for: research aptitude tests, graduate entrance exams, olympiad-level challenges."
       };
       hints.push(`Complexity rules: ${complexityPrompts[p.complexity] || p.complexity}`);
     }

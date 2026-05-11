@@ -71,7 +71,6 @@ model Quiz {
   id           String         @id @default(cuid())
   title        String
   originalText String
-  isSaved      Boolean        @default(false)
   userId       String?
   user         User?          @relation(fields: [userId], references: [id], onDelete: Cascade)
   questions    QuizQuestion[]

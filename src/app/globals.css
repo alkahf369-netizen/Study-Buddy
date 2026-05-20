@@ -1,5 +1,15 @@
 @import "tailwindcss";
 
+/* ============================================================
+   Mobile viewport fix — use dvh so the layout respects the
+   actual visible area (accounts for browser chrome/address bar).
+   Falls back to vh for older browsers.
+   ============================================================ */
+:root {
+  --app-height: 100vh;
+  --app-height: 100dvh;
+}
+
 body {
     margin: 0;
     font-family:
@@ -8,6 +18,8 @@ body {
         sans-serif;
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
+    /* Prevent overscroll bounce on mobile */
+    overscroll-behavior: none;
 }
 
 code {
@@ -202,6 +214,26 @@ code {
 /* --- Scroll lock utility --- */
 .antigravity-scroll-lock {
   overflow: hidden !important;
+}
+
+/* ================================================================
+   Streaming text — blinking cursor indicator
+   ================================================================ */
+
+/* Smooth cursor-like trailing effect while streaming */
+.sa-streaming > div > *:last-child::after {
+  content: "▊";
+  display: inline;
+  animation: cursorBlink 0.8s steps(2) infinite;
+  color: #a1a1aa;
+  font-size: 0.85em;
+  margin-left: 2px;
+  vertical-align: baseline;
+}
+
+@keyframes cursorBlink {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0; }
 }
 
 /* ================================================================
@@ -681,3 +713,109 @@ code {
   .lp-reveal     { opacity: 1; transform: none; transition: none; }
 }
 
+
+
+/* ============================================================
+   Quiz Streaming — fade-in animation for progressive questions
+   ============================================================ */
+@keyframes quizFadeIn {
+  from { opacity: 0; transform: translateY(8px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+.animate-quiz-fade-in {
+  animation: quizFadeIn 300ms ease-out forwards;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .animate-quiz-fade-in {
+    animation: none !important;
+    opacity: 1;
+    transform: none;
+  }
+}
+
+/* ============================================================
+   Math rendering — KaTeX overrides
+   ============================================================ */
+.sa-markdown .katex-display {
+  margin: 1em 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding: 0.5em 0;
+}
+
+.sa-markdown .katex {
+  font-size: 1.1em;
+}
+
+/* Ensure math in MCQ cards doesn't overflow */
+.katex-display {
+  overflow-x: auto;
+  overflow-y: hidden;
+}
+
+/* KaTeX error fallback — show as muted text instead of red */
+.katex-error {
+  color: #71717a;
+  font-family: monospace;
+  font-size: 0.9em;
+}
+
+/* ============================================================
+   Mobile-first responsive fixes
+   ============================================================ */
+
+/* Use dynamic viewport height for full-screen layouts */
+.h-screen-safe {
+  height: 100vh;
+  height: 100dvh;
+}
+
+/* Prevent horizontal overflow from code blocks on mobile */
+@media (max-width: 640px) {
+  .sa-markdown pre {
+    max-width: calc(100vw - 80px);
+    font-size: 0.78em;
+    padding: 0.75em 0.9em;
+    border-radius: 8px;
+  }
+
+  .sa-markdown code:not(pre code) {
+    font-size: 0.82em;
+    word-break: break-all;
+  }
+
+  .sa-markdown table {
+    min-width: 320px;
+  }
+
+  .sa-markdown {
+    font-size: 13.5px;
+    line-height: 1.65;
+  }
+
+  .sa-markdown h1 { font-size: 1.2em; }
+  .sa-markdown h2 { font-size: 1.1em; }
+  .sa-markdown h3 { font-size: 1em; }
+
+  .sa-markdown ul,
+  .sa-markdown ol {
+    padding-left: 1.2em;
+  }
+
+  /* Math rendering — mobile adjustments */
+  .sa-markdown .katex {
+    font-size: 1em;
+  }
+  .sa-markdown .katex-display {
+    font-size: 0.95em;
+  }
+}
+
+/* Ensure the composer never gets hidden behind mobile keyboard */
+@supports (height: 1dvh) {
+  .composer-safe-bottom {
+    padding-bottom: env(safe-area-inset-bottom, 0px);
+  }
+}

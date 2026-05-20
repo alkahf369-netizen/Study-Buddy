@@ -1,8 +1,11 @@
 import React, { useState, useRef, useEffect, useCallback, useMemo } from "react";
 import { createPortal } from "react-dom";
-import { useRouter } from "next/navigation";
-import ReactMarkdown from "react-markdown";
-import remarkGfm from "remark-gfm";
+import { MathMarkdown } from "@/components/ui/MathMarkdown";
+import { useQuizStream } from "@/hooks/useQuizStream";
+import PageRangeSelector from "@/components/PageRangeSelector";
+import SetupForm from "@/components/test/SetupForm";
+import { MCQCardUI } from "@/components/quiz/MCQCardUI";
+import ExamModeView from "@/components/quiz/ExamModeView";
 import {
   Plus,
   Sparkles,
@@ -53,6 +56,9 @@ import {
   BarChart3,
   Code,
   BookOpen,
+  Clock,
+  Share2,
+  LogIn,
 } from "lucide-react";
 
 /* Study Buddy Logo — uses the new brand image */
@@ -185,30 +191,17 @@ const COMPLEXITY_LEVELS = [
 
 /* ===== BACKEND INTEGRATION NOTE — read carefully when wiring the API =====
 
-The MCQ composer collects three generation parameters and forwards them all
-to the backend on submit:
+The MCQ composer collects generation parameters and forwards them to the
+backend on submit:
 
   {
     text:          string,        // the user's pasted material (or filename)
     complexity:    "recall" | "apply" | "analyze" | "mastery",
-    count:         number,        // user-requested # of MCQs (1..50)
-    aiAutoCount:   boolean,       // if true → AI decides the optimal count
   }
 
-Why `aiAutoCount` exists:
-  Users will sometimes ask for 20 MCQs from a 2-line paragraph. To avoid the
-  AI hallucinating filler questions, this toggle lets the user defer to the
-  model's judgment. When `aiAutoCount === true`:
-    1. The backend MUST IGNORE the `count` field entirely.
-    2. The model picks a reasonable number based on the source's depth.
-    3. The response should include the actual `count` used so the UI can
-       reflect it back to the user.
-  When `aiAutoCount === false`:
-    The backend should honor `count` exactly, but is still free to refuse /
-    warn the client if the source material is clearly insufficient.
-
-Frontend's job is purely to collect & forward these params — the backend
-is the source of truth for what gets generated.
+The AI always decides the optimal number of questions based on the source
+material depth. Frontend's job is purely to collect & forward the complexity
+param — the backend is the source of truth for what gets generated.
 ======================================================================= */
 
 const ComplexityPicker = ({ value, onChange }) => {
@@ -356,71 +349,6 @@ const ComplexityPicker = ({ value, onChange }) => {
   );
 };
 
-const CountStepper = ({ value, onChange, aiAuto, onToggleAiAuto, min = 1, max = 50 }) => {
-  const dec = () => onChange(Math.max(min, value - 1));
-  const inc = () => onChange(Math.min(max, value + 1));
-
-  return (
-    <div className="inline-flex shrink-0 items-stretch overflow-hidden rounded-lg border border-zinc-200 bg-white">
-      {/* AI Auto pill (left segment) */}
-      <button
-        data-testid="ai-auto-toggle"
-        onClick={onToggleAiAuto}
-        title={
-          aiAuto
-            ? "AI decides the optimal number of questions"
-            : "Let AI decide the number of questions"
-        }
-        aria-label={aiAuto ? "Disable auto count" : "Let AI decide count"}
-        className={cn(
-          "flex items-center gap-1 px-1.5 text-[12px] font-semibold transition-colors sm:gap-1.5 sm:px-3",
-          aiAuto
-            ? "bg-black text-white"
-            : "text-zinc-600 hover:bg-zinc-50 hover:text-black"
-        )}
-      >
-        <Wand2 className="h-[12px] w-[12px] sm:h-[13px] sm:w-[13px]" />
-        <span className="hidden sm:inline">Auto</span>
-      </button>
-
-      <span className="w-px bg-zinc-200" />
-
-      {/* Stepper (right segment) */}
-      <div
-        className={cn(
-          "flex items-center",
-          aiAuto && "pointer-events-none opacity-40"
-        )}
-      >
-        <button
-          data-testid="count-dec"
-          onClick={dec}
-          disabled={aiAuto || value <= min}
-          className="flex h-full w-6 items-center justify-center text-zinc-600 transition hover:bg-zinc-50 hover:text-black disabled:cursor-not-allowed disabled:opacity-40 sm:w-8"
-          aria-label="Decrease"
-        >
-          <Minus className="h-[12px] w-[12px] sm:h-[13px] sm:w-[13px]" />
-        </button>
-        <span
-          data-testid="count-value"
-          className="flex min-w-[22px] items-center justify-center text-[12.5px] font-semibold tabular-nums text-black sm:min-w-[36px] sm:px-1 sm:text-[13px]"
-        >
-          {aiAuto ? "—" : value}
-        </span>
-        <button
-          data-testid="count-inc"
-          onClick={inc}
-          disabled={aiAuto || value >= max}
-          className="flex h-full w-6 items-center justify-center text-zinc-600 transition hover:bg-zinc-50 hover:text-black disabled:cursor-not-allowed disabled:opacity-40 sm:w-8"
-          aria-label="Increase"
-        >
-          <Plus className="h-[12px] w-[12px] sm:h-[13px] sm:w-[13px]" />
-        </button>
-      </div>
-    </div>
-  );
-};
-
 /* ---------------- Settings persistence ---------------- */
 const SETTINGS_KEY = "sa.settings.v1";
 
@@ -450,6 +378,22 @@ const saveSettings = (settings) => {
     /* ignore */
   }
 };
+
+/** Normalize a question's options field — handles cases where options is a JSON string from DB. */
+const normalizeQuestion = (q) => {
+  if (!q || typeof q !== "object") return q;
+  if (Array.isArray(q.options)) return q;
+  if (typeof q.options === "string") {
+    try {
+      const parsed = JSON.parse(q.options);
+      return { ...q, options: Array.isArray(parsed) ? parsed : [] };
+    } catch {
+      return { ...q, options: [] };
+    }
+  }
+  return { ...q, options: [] };
+};
+const normalizeQuestions = (arr) => (Array.isArray(arr) ? arr.map(normalizeQuestion) : []);
 
 /* ---------------- Token Usage Tracking ---------------- */
 const TOKEN_USAGE_KEY = "quasar_token_usage";
@@ -744,6 +688,69 @@ function cn(...classes) {
 }
 
 /* ---------------- Model Switcher ---------------- */
+/* ---------------- Mode Switcher (inline @chat / @quiz pill) ---------------- */
+const ModeSwitcher = ({ value, onChange }) => {
+  const [open, setOpen] = useState(false);
+  const ref = useRef(null);
+
+  useEffect(() => {
+    const handler = (e) => {
+      if (ref.current && !ref.current.contains(e.target)) setOpen(false);
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, []);
+
+  const options = [
+    { id: "chat", label: "@chat", Icon: MessageCircle },
+    { id: "mcq", label: "@quiz", Icon: ListChecks },
+  ];
+  const current = options.find((o) => o.id === value) || options[0];
+
+  return (
+    <div className="relative" ref={ref}>
+      <button
+        data-testid="mode-switcher"
+        onClick={() => setOpen((v) => !v)}
+        className="inline-flex items-center gap-1 rounded-lg border border-zinc-200 bg-white px-2 py-1.5 text-[12.5px] font-medium text-zinc-700 transition hover:border-zinc-400 hover:bg-zinc-50"
+      >
+        <current.Icon className="h-3.5 w-3.5" />
+        <span>{current.label}</span>
+        <ChevronDown
+          className={cn(
+            "h-3 w-3 text-zinc-400 transition-transform",
+            open && "rotate-180"
+          )}
+        />
+      </button>
+      {open && (
+        <div className="absolute bottom-full left-0 z-50 mb-1 min-w-[110px] overflow-hidden rounded-lg border border-zinc-200 bg-white py-1 shadow-lg">
+          {options.map((opt) => {
+            const active = value === opt.id;
+            return (
+              <button
+                key={opt.id}
+                data-testid={`mode-option-${opt.id}`}
+                onClick={() => { onChange(opt.id); setOpen(false); }}
+                className={cn(
+                  "flex w-full items-center gap-2 px-3 py-1.5 text-[12.5px] font-medium transition",
+                  active
+                    ? "bg-zinc-100 text-black"
+                    : "text-zinc-600 hover:bg-zinc-50 hover:text-black"
+                )}
+              >
+                <opt.Icon className="h-3.5 w-3.5" />
+                <span>{opt.label}</span>
+                {active && <Check className="ml-auto h-3 w-3 text-black" />}
+              </button>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+};
+
 const ModelSwitcher = ({ models, value, onChange }) => {
   const [open, setOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
@@ -894,9 +901,9 @@ const ModelSwitcher = ({ models, value, onChange }) => {
                   }
                 : {
                     left: triggerRect.left,
-                    top: triggerRect.top - 8 - 330,
+                    top: triggerRect.top - 8 - 280,
                     width: 380,
-                    height: 330,
+                    height: 280,
                   }
             }
           >
@@ -957,7 +964,7 @@ const ModelSwitcher = ({ models, value, onChange }) => {
               </div>
             </div>
           
-          <div ref={listRef} className="max-h-[140px] overflow-y-auto [scrollbar-width:thin] space-y-0.5 px-1 pb-1 sm:max-h-[300px] sm:space-y-1">
+          <div ref={listRef} className="flex-1 overflow-y-auto [scrollbar-width:thin] space-y-0.5 px-1 pb-1 sm:max-h-[220px] sm:space-y-1">
             {filteredModels.length === 0 ? (
               <div className="py-6 text-center text-[12.5px] text-zinc-500">
                 No models found matching "{searchQuery}"
@@ -1058,6 +1065,7 @@ const SettingsModal = ({
 }) => {
   const [tab, setTab] = useState("profile");
   const [draft, setDraft] = useState(settings);
+  const [baseSnapshot, setBaseSnapshot] = useState(settings);
   const [savedFlash, setSavedFlash] = useState(false);
   
   // API Key Form State
@@ -1068,10 +1076,16 @@ const SettingsModal = ({
   const [keyError, setKeyError] = useState("");
   const [showApiKey, setShowApiKey] = useState(false);
 
-  // Re-sync local draft whenever the modal is opened or settings change
+  // Re-sync local draft whenever the modal is opened
   useEffect(() => {
     if (open) {
-      setDraft(settings);
+      const initialDraft = { ...settings };
+      // If defaultModelId doesn't match any available model, use the first one
+      if (models.length > 0 && !models.some(m => m.id === initialDraft.defaultModelId)) {
+        initialDraft.defaultModelId = models[0].id;
+      }
+      setDraft(initialDraft);
+      setBaseSnapshot(settings); // keep original for dirty comparison
       setTab("profile");
       setSavedFlash(false);
       
@@ -1082,7 +1096,8 @@ const SettingsModal = ({
       setShowApiKey(false);
       setIsSavingKey(false);
     }
-  }, [open, settings]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open]);
 
   // Close on ESC
   useEffect(() => {
@@ -1096,10 +1111,16 @@ const SettingsModal = ({
 
   if (!open) return null;
 
-  const dirty = JSON.stringify(draft) !== JSON.stringify(settings);
+  const dirty = JSON.stringify(draft) !== JSON.stringify(baseSnapshot);
 
   const handleSave = () => {
-    onSave(draft);
+    // Ensure defaultModelId is valid (exists in models list)
+    const finalDraft = { ...draft };
+    if (models.length > 0 && !models.some(m => m.id === finalDraft.defaultModelId)) {
+      finalDraft.defaultModelId = models[0].id;
+    }
+    onSave(finalDraft);
+    setBaseSnapshot(finalDraft);
     setSavedFlash(true);
     setTimeout(() => setSavedFlash(false), 1400);
   };
@@ -1503,7 +1524,7 @@ const SettingsModal = ({
                   </label>
                   <select
                     data-testid="settings-defaultModel"
-                    value={draft.defaultModelId}
+                    value={models.some(m => m.id === draft.defaultModelId) ? draft.defaultModelId : (models[0]?.id || "")}
                     onChange={(e) =>
                       update({ defaultModelId: e.target.value })
                     }
@@ -1681,42 +1702,6 @@ const SettingsModal = ({
 };
 
 /* ---------------- Sidebar ---------------- */
-const SectionTabs = ({ section, onChange }) => {
-  const tabs = [
-    { id: "chat", label: "Chat", Icon: MessageCircle },
-    { id: "mcq", label: "MCQ", Icon: ListChecks },
-  ];
-
-  return (
-    <div className="relative inline-flex items-center rounded-xl border border-zinc-200 bg-white p-1 shadow-sm">
-      {/* sliding highlight */}
-      <div
-        className={cn(
-          "absolute top-1 bottom-1 w-[calc(50%-4px)] rounded-lg bg-black transition-all duration-300 ease-out",
-          section === "chat" ? "left-1" : "left-[calc(50%+0px)]"
-        )}
-      />
-      {tabs.map((t) => {
-        const active = section === t.id;
-        const Icon = t.Icon;
-        return (
-          <button
-            key={t.id}
-            data-testid={`tab-${t.id}`}
-            onClick={() => onChange(t.id)}
-            className={cn(
-              "relative z-10 flex items-center justify-center gap-1.5 rounded-lg px-4 py-1.5 text-[12.5px] font-semibold transition-colors duration-200",
-              active ? "text-white" : "text-zinc-600 hover:text-black"
-            )}
-          >
-            <Icon className="h-[14px] w-[14px]" />
-            {t.label}
-          </button>
-        );
-      })}
-    </div>
-  );
-};
 
 const Sidebar = ({
   open,
@@ -1757,7 +1742,7 @@ const Sidebar = ({
       <aside
         data-testid="sidebar"
         className={cn(
-          "h-screen shrink-0 transition-[width,transform] duration-300 ease-out",
+          "shrink-0 transition-[width,transform] duration-300 ease-out",
           // Mobile: fixed overlay drawer (always 280px wide, slides in/out)
           "fixed inset-y-0 left-0 z-40 w-[280px]",
           open ? "translate-x-0" : "-translate-x-full",
@@ -1765,6 +1750,7 @@ const Sidebar = ({
           "sm:relative sm:translate-x-0",
           open ? "sm:w-[280px]" : "sm:w-[68px]"
         )}
+        style={{ height: 'var(--app-height, 100vh)' }}
       >
       {/* Glass surface on white */}
       <div
@@ -1966,800 +1952,19 @@ const Sidebar = ({
   );
 };
 
-/* ---------------- MCQ Card (paper style) ---------------- */
-const MCQCard = ({ q, index, selected, onSelect }) => {
-  const answered = selected !== null && selected !== undefined;
-
-  return (
-    <div
-      data-testid={`mcq-card-${index}`}
-      className="group relative overflow-hidden rounded-2xl border p-4 transition-all duration-300 sm:p-6"
-      style={{
-        background:
-          "linear-gradient(180deg, #fbf4de 0%, #f4ead0 60%, #eeddb6 100%)",
-        borderColor: "#c7ad78",
-        boxShadow:
-          "inset 0 1px 0 rgba(255,255,255,0.7), 0 1px 2px rgba(90,60,20,0.06), 0 10px 28px rgba(120,85,30,0.10)",
-      }}
-    >
-      {/* Faint ruled lines — mimics exam paper */}
-      <div
-        aria-hidden="true"
-        className="pointer-events-none absolute inset-0 opacity-[0.35]"
-        style={{
-          backgroundImage:
-            "repeating-linear-gradient(to bottom, transparent 0, transparent 27px, rgba(139,101,45,0.18) 27px, rgba(139,101,45,0.18) 28px)",
-        }}
-      />
-      {/* Warm inner glow on the left edge — like a paper fold shadow */}
-      <div
-        aria-hidden="true"
-        className="pointer-events-none absolute inset-y-0 left-0 w-8"
-        style={{
-          background:
-            "linear-gradient(90deg, rgba(139,101,45,0.10), transparent)",
-        }}
-      />
-
-      {/* Question header */}
-      <div className="relative mb-5 flex items-start gap-3">
-        <div
-          className="flex h-8 min-w-[32px] shrink-0 items-center justify-center rounded-md px-2 text-[12px] font-semibold"
-          style={{
-            background: "#2a2218",
-            color: "#fbf4de",
-            boxShadow: "0 1px 0 rgba(255,255,255,0.15) inset",
-          }}
-        >
-          Q{index + 1}
-        </div>
-        <h3
-          className="flex-1 text-[15px] leading-relaxed md:text-[17px]"
-          style={{
-            color: "#2a2218",
-            fontFamily: "'Manrope', system-ui, sans-serif",
-            fontWeight: 650,
-            letterSpacing: "-0.005em",
-          }}
-        >
-          {q.question}
-        </h3>
-        <span
-          data-testid={`mcq-${index}-mark`}
-          className="ml-2 inline-flex shrink-0 items-center gap-1 rounded-md border px-1.5 py-0.5 text-[10.5px] font-semibold"
-          style={{
-            background: "#fff9e8",
-            borderColor: "#c7ad78",
-            color: "#6b5434",
-          }}
-          title="This question is worth 1 point"
-        >
-          <Target className="h-[10px] w-[10px]" />
-          1 pt
-        </span>
-      </div>
-
-      {/* Options */}
-      <div className="relative grid gap-2 sm:grid-cols-2">
-        {q.options.map((opt, i) => {
-          const isSelected = selected === opt;
-          const isCorrect = opt === q.correctAnswer;
-          // Tick-box states:
-          //   - unanswered             → empty box
-          //   - user picked & correct  → black tick
-          //   - user picked & wrong    → red cross
-          //   - user picked wrong AND this is the right one → auto black tick
-          const showTick = answered && isCorrect; // correct answer always gets a tick once answered
-          const showCross = answered && isSelected && !isCorrect;
-
-          return (
-            <button
-              key={i}
-              data-testid={`mcq-${index}-option-${i}`}
-              disabled={answered}
-              onClick={() => onSelect(opt)}
-              className={cn(
-                "group/opt relative flex items-center gap-3 rounded-lg border px-3 py-2.5 text-left text-[13.5px] transition-all duration-200",
-                !answered &&
-                  "hover:-translate-y-0.5 hover:shadow-[0_2px_6px_rgba(120,85,30,0.15)]",
-                answered && !isSelected && !isCorrect && "opacity-55"
-              )}
-              style={{
-                borderColor: showCross
-                  ? "#b23939"
-                  : showTick
-                  ? "#2a2218"
-                  : "rgba(139,101,45,0.35)",
-                background: showCross
-                  ? "rgba(223,92,92,0.08)"
-                  : showTick
-                  ? "rgba(255,255,255,0.55)"
-                  : "rgba(255,255,255,0.35)",
-                color: "#2a2218",
-                fontFamily: "'Edu VIC WA NT Beginner', 'Comic Sans MS', cursive",
-                fontWeight: 500,
-                fontSize: "15px",
-                lineHeight: "1.4",
-              }}
-            >
-              {/* Tick-box */}
-              <div
-                className={cn(
-                  "flex h-5 w-5 shrink-0 items-center justify-center rounded-[3px] border-[1.5px] transition-colors"
-                )}
-                style={{
-                  borderColor: showCross
-                    ? "#b23939"
-                    : showTick
-                    ? "#2a2218"
-                    : "#8a7348",
-                  background: showTick
-                    ? "#fbf4de"
-                    : showCross
-                    ? "#fff"
-                    : "rgba(255,255,255,0.6)",
-                }}
-              >
-                {showTick && (
-                  <Check
-                    className="h-[14px] w-[14px]"
-                    strokeWidth={3}
-                    style={{ color: "#2a2218" }}
-                  />
-                )}
-                {showCross && (
-                  <X
-                    className="h-[14px] w-[14px]"
-                    strokeWidth={3}
-                    style={{ color: "#b23939" }}
-                  />
-                )}
-              </div>
-
-              {/* Option letter + text */}
-              <span className="flex-1 leading-snug">
-                <span
-                  className="mr-1.5 font-semibold"
-                  style={{
-                    color: "#6b5434",
-                    fontFamily: "'Manrope', system-ui, sans-serif",
-                    fontWeight: 650,
-                  }}
-                >
-                  {String.fromCharCode(65 + i)}.
-                </span>
-                {opt}
-              </span>
-            </button>
-          );
-        })}
-      </div>
-
-      {/* Explanation */}
-      <div
-        className={cn(
-          "relative grid overflow-hidden transition-all duration-500 ease-out",
-          answered
-            ? "mt-5 grid-rows-[1fr] opacity-100"
-            : "mt-0 grid-rows-[0fr] opacity-0"
-        )}
-      >
-        <div className="min-h-0">
-          <div
-            data-testid={`mcq-${index}-explanation`}
-            className="flex gap-3 rounded-xl border p-4"
-            style={{
-              background: "rgba(255,249,220,0.75)",
-              borderColor: "#c7ad78",
-            }}
-          >
-            <div
-              className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg"
-              style={{
-                background: "rgba(234,179,8,0.18)",
-                color: "#8a6a10",
-                boxShadow: "inset 0 0 0 1px rgba(234,179,8,0.35)",
-              }}
-            >
-              <Lightbulb className="h-4 w-4" />
-            </div>
-            <div className="min-w-0 flex-1">
-              <div
-                className="mb-1 text-[11px] font-semibold uppercase tracking-wider"
-                style={{
-                  color: "#8a6a10",
-                  fontFamily: "'Manrope', system-ui, sans-serif",
-                  fontWeight: 700,
-                }}
-              >
-                Explanation
-              </div>
-              <p
-                className="text-[13.5px] leading-relaxed"
-                style={{
-                  color: "#3a2f1e",
-                  fontFamily: "'Manrope', system-ui, sans-serif",
-                  fontWeight: 500,
-                }}
-              >
-                {q.explanation}
-              </p>
-            </div>
-          </div>
-        </div>
-      </div>
-    </div>
-  );
-};
-
-/* ---------------- Result paper (shown after all MCQs answered) ---------------- */
-const GRADE_TABLE = [
-  { min: 97, grade: "A+", remark: "Outstanding work!" },
-  { min: 93, grade: "A",  remark: "Excellent — very well done." },
-  { min: 90, grade: "A-", remark: "Great job, nearly perfect." },
-  { min: 87, grade: "B+", remark: "Strong performance." },
-  { min: 83, grade: "B",  remark: "Solid effort, keep it up." },
-  { min: 80, grade: "B-", remark: "Good attempt — a bit more to polish." },
-  { min: 77, grade: "C+", remark: "Decent, keep practicing." },
-  { min: 73, grade: "C",  remark: "Room to improve — you can do it." },
-  { min: 70, grade: "C-", remark: "Needs more review." },
-  { min: 67, grade: "D+", remark: "Revise the basics and try again." },
-  { min: 63, grade: "D",  remark: "Keep at it — review and retry." },
-  { min: 60, grade: "D-", remark: "Don't give up — practice helps." },
-  { min: 0,  grade: "F",  remark: "Review the material and try once more." },
-];
-
-const gradeFor = (pct) => GRADE_TABLE.find((g) => pct >= g.min) || GRADE_TABLE[GRADE_TABLE.length - 1];
-
-const RED_PEN = "#c42a30";
-const HAND_FONT = "'Edu VIC WA NT Beginner', 'Comic Sans MS', cursive";
-
-/* ---------- Best-score memory (per quiz) ----------
- * Stored in localStorage under `sa.bestscores.v1`. Keyed by quiz title + total
- * so different quizzes never collide. Backend can replace this with a real
- * per-user leaderboard later — the public shape is preserved.
- */
-const BEST_SCORES_KEY = "sa.bestscores.v1";
-
-const loadBestScores = () => {
-  try {
-    const raw = window.localStorage.getItem(BEST_SCORES_KEY);
-    if (!raw) return {};
-    const parsed = JSON.parse(raw);
-    return parsed && typeof parsed === "object" ? parsed : {};
-  } catch {
-    return {};
-  }
-};
-
-const saveBestScores = (obj) => {
-  try {
-    window.localStorage.setItem(BEST_SCORES_KEY, JSON.stringify(obj));
-  } catch {
-    /* ignore */
-  }
-};
-
-const quizKeyOf = (title, total) => `${(title || "quiz").trim()}::${total}`;
-
-const QuizResult = ({ correct, total, onRetry, onClose, title }) => {
-  const pct = total > 0 ? Math.round((correct / total) * 100) : 0;
-  const { grade, remark } = gradeFor(pct);
-  const dateStr = new Date().toLocaleDateString(undefined, {
-    month: "short",
-    day: "numeric",
-    year: "numeric",
-  });
-
-  /* Compare against prior best & persist. Computed once per popup mount.
-   * Guarded with a ref so React 18 StrictMode's double effect-invoke in dev
-   * doesn't double-count attempts or clobber the comparison. */
-  const [compare, setCompare] = useState(null);
-  const persistedRef = useRef(false);
-  useEffect(() => {
-    if (persistedRef.current) return;
-    persistedRef.current = true;
-
-    const all = loadBestScores();
-    const key = quizKeyOf(title, total);
-    const prior = all[key];
-    const attemptsNow = (prior?.attempts || 0) + 1;
-
-    let status;
-    if (!prior) status = "first";
-    else if (correct > prior.bestCorrect) status = "new-best";
-    else if (correct === prior.bestCorrect) status = "matched";
-    else status = "below";
-
-    setCompare({
-      status,
-      attempts: attemptsNow,
-      priorBest: prior
-        ? {
-            bestCorrect: prior.bestCorrect,
-            bestGrade: prior.bestGrade,
-            bestPct: prior.bestPct,
-          }
-        : null,
-      delta: prior ? correct - prior.bestCorrect : null,
-    });
-
-    // Persist: keep the best-ever, but always increment attempts
-    const shouldUpdateBest = !prior || correct > prior.bestCorrect;
-    all[key] = {
-      bestCorrect: shouldUpdateBest ? correct : prior.bestCorrect,
-      bestPct: shouldUpdateBest ? pct : prior.bestPct,
-      bestGrade: shouldUpdateBest ? grade : prior.bestGrade,
-      attempts: attemptsNow,
-      lastAt: new Date().toISOString(),
-    };
-    saveBestScores(all);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  return (
-    <div
-      data-testid="quiz-result"
-      className="relative mb-5 overflow-hidden rounded-2xl border p-5 sm:p-7"
-      style={{
-        background:
-          "linear-gradient(180deg, #fbf4de 0%, #f4ead0 60%, #eeddb6 100%)",
-        borderColor: "#c7ad78",
-        boxShadow:
-          "inset 0 1px 0 rgba(255,255,255,0.7), 0 1px 2px rgba(90,60,20,0.06), 0 10px 28px rgba(120,85,30,0.12)",
-      }}
-    >
-      {/* Ruled lines */}
-      <div
-        aria-hidden="true"
-        className="pointer-events-none absolute inset-0 opacity-[0.35]"
-        style={{
-          backgroundImage:
-            "repeating-linear-gradient(to bottom, transparent 0, transparent 27px, rgba(139,101,45,0.18) 27px, rgba(139,101,45,0.18) 28px)",
-        }}
-      />
-      {/* Left-edge fold shadow */}
-      <div
-        aria-hidden="true"
-        className="pointer-events-none absolute inset-y-0 left-0 w-8"
-        style={{
-          background:
-            "linear-gradient(90deg, rgba(139,101,45,0.10), transparent)",
-        }}
-      />
-
-      {/* New-best stamp (corner sticker style) */}
-      {compare?.status === "new-best" && (
-        <div
-          data-testid="new-best-stamp"
-          className="sa-stamp-in pointer-events-none absolute right-3 top-3 z-10 sm:right-4 sm:top-4"
-        >
-          <div
-            className="flex flex-col items-center justify-center rounded-full px-3 py-2 text-center"
-            style={{
-              border: `2.5px solid ${RED_PEN}`,
-              color: RED_PEN,
-              background: "rgba(255,249,220,0.92)",
-              fontFamily: HAND_FONT,
-              fontWeight: 700,
-              lineHeight: 1,
-              boxShadow: "0 4px 12px rgba(196,42,48,0.22)",
-            }}
-          >
-            <span style={{ fontSize: "11px", letterSpacing: "0.1em" }}>★ NEW ★</span>
-            <span style={{ fontSize: "18px", marginTop: 2 }}>BEST!</span>
-          </div>
-        </div>
-      )}
-
-      {/* Top row: label + retry */}
-      <div className="relative mb-4 flex items-start justify-between">
-        <div>
-          <div
-            className="text-[11px] font-semibold uppercase tracking-[0.18em]"
-            style={{
-              color: "#8a6a10",
-              fontFamily: "'Manrope', system-ui, sans-serif",
-              fontWeight: 700,
-            }}
-          >
-            Result sheet
-          </div>
-          <div
-            className="mt-1 text-[11.5px]"
-            style={{
-              color: "#8a7348",
-              fontFamily: "'Manrope', system-ui, sans-serif",
-            }}
-          >
-            Graded on {dateStr}
-          </div>
-        </div>
-
-        <div className="flex items-center gap-2">
-          <button
-            data-testid="quiz-retry"
-            onClick={onRetry}
-            className="inline-flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-[12.5px] font-semibold transition hover:-translate-y-0.5"
-            style={{
-              borderColor: "#c7ad78",
-              background: "rgba(255,255,255,0.55)",
-              color: "#3a2f1e",
-              fontFamily: "'Manrope', system-ui, sans-serif",
-              fontWeight: 650,
-            }}
-          >
-            <RefreshCw className="h-[13px] w-[13px]" />
-            Retry
-          </button>
-          {onClose && (
-            <button
-              data-testid="quiz-result-close"
-              onClick={onClose}
-              aria-label="Close"
-              className="flex h-8 w-8 items-center justify-center rounded-lg border transition hover:-translate-y-0.5"
-              style={{
-                borderColor: "#c7ad78",
-                background: "rgba(255,255,255,0.55)",
-                color: "#3a2f1e",
-              }}
-            >
-              <X className="h-[15px] w-[15px]" />
-            </button>
-          )}
-        </div>
-      </div>
-
-      {/* Main grade row */}
-      <div className="relative flex flex-col items-start gap-5 sm:flex-row sm:items-center sm:gap-7">
-        {/* Big grade inside hand-drawn red circle */}
-        <div className="relative flex h-[128px] w-[128px] shrink-0 items-center justify-center self-center sm:self-auto">
-          {/* Hand-drawn double ellipse */}
-          <svg
-            viewBox="0 0 128 128"
-            className="absolute inset-0"
-            aria-hidden="true"
-          >
-            <ellipse
-              cx="64"
-              cy="64"
-              rx="56"
-              ry="52"
-              fill="none"
-              stroke={RED_PEN}
-              strokeWidth="2.4"
-              strokeLinecap="round"
-              transform="rotate(-6 64 64)"
-              style={{ opacity: 0.92 }}
-            />
-            <ellipse
-              cx="64"
-              cy="64"
-              rx="54"
-              ry="50"
-              fill="none"
-              stroke={RED_PEN}
-              strokeWidth="1.6"
-              strokeLinecap="round"
-              transform="rotate(-2 64 64)"
-              style={{ opacity: 0.55 }}
-            />
-          </svg>
-          <span
-            data-testid="quiz-grade"
-            style={{
-              color: RED_PEN,
-              fontFamily: HAND_FONT,
-              fontWeight: 700,
-              fontSize: grade.length > 1 ? "64px" : "78px",
-              lineHeight: 1,
-              transform: "rotate(-4deg)",
-              textShadow: "0 1px 0 rgba(196,42,48,0.15)",
-            }}
-          >
-            {grade}
-          </span>
-        </div>
-
-        {/* Score + remark */}
-        <div className="min-w-0 flex-1">
-          <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
-            <span
-              className="text-[13px] uppercase tracking-wider"
-              style={{
-                color: "#6b5434",
-                fontFamily: "'Manrope', system-ui, sans-serif",
-                fontWeight: 650,
-              }}
-            >
-              Score
-            </span>
-            <span
-              data-testid="quiz-score"
-              style={{
-                color: RED_PEN,
-                fontFamily: HAND_FONT,
-                fontWeight: 700,
-                fontSize: "40px",
-                lineHeight: 1,
-                transform: "rotate(-2deg)",
-                display: "inline-block",
-              }}
-            >
-              {correct}/{total}
-            </span>
-            <span
-              style={{
-                color: RED_PEN,
-                fontFamily: HAND_FONT,
-                fontWeight: 600,
-                fontSize: "24px",
-                lineHeight: 1,
-                transform: "rotate(-1deg)",
-                display: "inline-block",
-                opacity: 0.9,
-              }}
-            >
-              ({pct}%)
-            </span>
-          </div>
-
-          {/* Hand-drawn red underline under the score */}
-          <svg
-            viewBox="0 0 240 10"
-            preserveAspectRatio="none"
-            className="mt-1 h-[8px] w-[180px] max-w-full"
-            aria-hidden="true"
-          >
-            <path
-              d="M 2 6 Q 60 2, 120 5 T 238 4"
-              fill="none"
-              stroke={RED_PEN}
-              strokeWidth="2"
-              strokeLinecap="round"
-              style={{ opacity: 0.85 }}
-            />
-          </svg>
-
-          {/* Remark */}
-          <p
-            data-testid="quiz-remark"
-            className="mt-4 leading-snug"
-            style={{
-              color: RED_PEN,
-              fontFamily: HAND_FONT,
-              fontWeight: 600,
-              fontSize: "19px",
-              transform: "rotate(-0.8deg)",
-              transformOrigin: "left center",
-              display: "inline-block",
-            }}
-          >
-            {remark}
-          </p>
-
-          {/* Best-score comparison note (red pen) */}
-          {compare && (
-            <div
-              data-testid="quiz-compare"
-              className="mt-3 flex items-center gap-2"
-              style={{
-                color: RED_PEN,
-                fontFamily: HAND_FONT,
-                fontWeight: 600,
-                fontSize: "15px",
-              }}
-            >
-              {compare.status === "first" && (
-                <span style={{ transform: "rotate(-0.5deg)", display: "inline-block" }}>
-                  First attempt — setting your benchmark.
-                </span>
-              )}
-              {compare.status === "new-best" && (
-                <span style={{ transform: "rotate(-0.5deg)", display: "inline-block" }}>
-                  New best! <span style={{ fontWeight: 700 }}>+{compare.delta}</span> from your last best · Attempt #{compare.attempts}
-                </span>
-              )}
-              {compare.status === "matched" && (
-                <span style={{ transform: "rotate(-0.5deg)", display: "inline-block" }}>
-                  = Matched your best · Attempt #{compare.attempts}
-                </span>
-              )}
-              {compare.status === "below" && (
-                <span style={{ transform: "rotate(-0.5deg)", display: "inline-block" }}>
-                  Prev best: {compare.priorBest.bestCorrect}/{total} ({compare.priorBest.bestGrade}) · Attempt #{compare.attempts}
-                </span>
-              )}
-            </div>
-          )}
-
-          {/* Signature line */}
-          <div
-            className="mt-5 flex items-center justify-between gap-3"
-            style={{
-              color: "#8a7348",
-              fontFamily: "'Manrope', system-ui, sans-serif",
-            }}
-          >
-            <span className="text-[11.5px]">
-              Review your answers below ↓
-            </span>
-            <span
-              style={{
-                color: RED_PEN,
-                fontFamily: HAND_FONT,
-                fontWeight: 600,
-                fontSize: "16px",
-                transform: "rotate(-3deg)",
-                display: "inline-block",
-              }}
-            >
-              — Study AI
-            </span>
-          </div>
-        </div>
-      </div>
-    </div>
-  );
-};
-
-/* ---------------- Quiz View ---------------- */
-const QuizView = ({ questions, answers, onAnswer, onReset, onRetry, title }) => {
-  const total = questions.length;
-  const answered = Object.keys(answers).length;
-  const correct = Object.entries(answers).filter(
-    ([idx, ans]) => questions[Number(idx)].correctAnswer === ans
-  ).length;
-  const completed = total > 0 && answered === total;
-
-  // Result popup state — auto-opens the moment the quiz transitions to complete.
-  const [resultOpen, setResultOpen] = useState(false);
-  const prevCompletedRef = useRef(false);
-
-  useEffect(() => {
-    if (completed && !prevCompletedRef.current) {
-      // small delay so the last option's tick animation finishes first
-      const t = setTimeout(() => setResultOpen(true), 350);
-      prevCompletedRef.current = true;
-      return () => clearTimeout(t);
-    }
-    if (!completed) prevCompletedRef.current = false;
-  }, [completed]);
-
-  // ESC closes the popup
-  useEffect(() => {
-    if (!resultOpen) return;
-    const onKey = (e) => {
-      if (e.key === "Escape") setResultOpen(false);
-    };
-    document.addEventListener("keydown", onKey);
-    return () => document.removeEventListener("keydown", onKey);
-  }, [resultOpen]);
-
-  const handleRetryFromResult = () => {
-    setResultOpen(false);
-    onRetry?.();
-  };
-
-  return (
-    <section className="mx-auto w-full max-w-3xl px-4 pb-32 sm:px-6">
-      <div className="mb-6 flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
-        <div>
-          <div className="mb-2 inline-flex items-center gap-2 rounded-full border border-zinc-200 bg-white px-3 py-1 text-[11px] font-medium text-zinc-700">
-            <Zap className="h-3 w-3 text-amber-500" />
-            Generated quiz
-          </div>
-          <h2 className="text-2xl font-semibold tracking-tight text-black">
-            {title || "Quiz session"}
-          </h2>
-          <p className="mt-1 text-sm text-zinc-500">
-            {total} questions · Pick an option to reveal the explanation
-          </p>
-        </div>
-        <button
-          data-testid="reset-quiz"
-          onClick={onReset}
-          className="inline-flex items-center gap-2 rounded-lg border border-zinc-200 bg-white px-3.5 py-2 text-sm text-zinc-700 transition hover:border-zinc-400 hover:bg-zinc-50 hover:text-black"
-        >
-          <Plus className="h-4 w-4 rotate-45" />
-          Clear
-        </button>
-      </div>
-
-      <div className="mb-8 rounded-xl border border-zinc-200 bg-white p-4">
-        <div className="mb-3 flex items-center justify-between text-xs text-zinc-500">
-          <span>
-            Progress:{" "}
-            <span className="font-semibold text-black">
-              {answered}/{total}
-            </span>
-          </span>
-          <span className="inline-flex items-center gap-1.5">
-            <Target className="h-[12px] w-[12px] text-zinc-700" />
-            Score:{" "}
-            <span className="font-semibold text-black tabular-nums">
-              {correct}
-            </span>
-            <span className="text-zinc-400">/ {total} pts</span>
-          </span>
-        </div>
-        <div className="h-1.5 w-full overflow-hidden rounded-full bg-zinc-100">
-          <div
-            className="h-full rounded-full bg-black transition-all duration-500 ease-out"
-            style={{ width: `${(answered / total) * 100}%` }}
-          />
-        </div>
-      </div>
-
-      <div className="space-y-4">
-        {questions.map((q, i) => (
-          <MCQCard
-            key={i}
-            q={q}
-            index={i}
-            selected={answers[i]}
-            onSelect={(opt) => onAnswer(i, opt)}
-          />
-        ))}
-      </div>
-
-      {/* Floating "View Result" pill — visible after completion if the popup was dismissed */}
-      {completed && !resultOpen && (
-        <button
-          data-testid="view-result"
-          onClick={() => setResultOpen(true)}
-          className="fixed bottom-24 right-4 z-30 inline-flex items-center gap-2 rounded-full border px-4 py-2 text-[13px] font-semibold shadow-lg transition hover:-translate-y-0.5 sm:bottom-28 sm:right-6"
-          style={{
-            background: "linear-gradient(180deg, #fbf4de 0%, #eeddb6 100%)",
-            borderColor: "#c7ad78",
-            color: RED_PEN,
-            fontFamily: HAND_FONT,
-            fontWeight: 700,
-            boxShadow: "0 10px 28px rgba(120,85,30,0.22)",
-          }}
-        >
-          <Target className="h-[14px] w-[14px]" style={{ color: RED_PEN }} />
-          View Result
-        </button>
-      )}
-
-      {/* Result popup */}
-      {resultOpen && (
-        <div
-          data-testid="result-modal"
-          className="fixed inset-0 z-50 flex items-center justify-center px-3 py-6 sm:px-4"
-        >
-          {/* Backdrop */}
-          <div
-            className="sa-fade-in absolute inset-0 bg-black/40 backdrop-blur-sm"
-            onClick={() => setResultOpen(false)}
-          />
-
-          {/* Paper */}
-          <div
-            className="sa-paper-in relative z-10 w-full max-w-[640px]"
-          >
-            <QuizResult
-              correct={correct}
-              total={total}
-              onRetry={handleRetryFromResult}
-              onClose={() => setResultOpen(false)}
-              title={title}
-            />
-          </div>
-        </div>
-      )}
-    </section>
-  );
-};
-
 /* ---------------- MCQ Composer (upload-focused) ---------------- */
-const MCQComposer = ({ onSubmitText, onUpload, sendOnEnter }) => {  const [text, setText] = useState("");
-  const [complexity, setComplexity] = useState("apply");
-  const [count, setCount] = useState(5);
-  const [aiAutoCount, setAiAutoCount] = useState(false);
+const MCQComposer = ({ onSubmitText, onUpload, sendOnEnter, section, onSectionChange }) => {  const [text, setText] = useState("");
+  const [fileSizeError, setFileSizeError] = useState("");
+  const [uploadedFile, setUploadedFile] = useState(null); // { file, base64Data, mimeType }
+  const [pageRanges, setPageRanges] = useState({}); // keyed by file index
   const fileRef = useRef(null);
   const taRef = useRef(null);
+
+  const isPdf = uploadedFile && uploadedFile.mimeType === "application/pdf";
+  // Determine if the page range is valid (non-null) for the uploaded PDF
+  const hasValidPageRange = isPdf && pageRanges[0] != null;
+  // Can submit: either has text, or has a non-PDF file, or has a PDF with valid page range
+  const canSubmit = text.trim().length > 0 || (uploadedFile && !isPdf) || (isPdf && hasValidPageRange);
 
   const handleInput = (e) => {
     setText(e.target.value);
@@ -2772,26 +1977,80 @@ const MCQComposer = ({ onSubmitText, onUpload, sendOnEnter }) => {  const [text,
 
   const buildPayload = () => ({
     text,
-    complexity,
-    count,
-    aiAutoCount,
   });
 
   const handleSubmit = () => {
+    // If there's an uploaded file, submit with file + page ranges
+    if (uploadedFile) {
+      const payload = {
+        file: uploadedFile.file,
+        text: text.trim() || undefined, // include user text alongside file
+      };
+      // Include page ranges for PDF files with valid ranges
+      if (isPdf && hasValidPageRange) {
+        payload.pageRanges = { 0: pageRanges[0] };
+      }
+      onUpload(payload);
+      setUploadedFile(null);
+      setPageRanges({});
+      setText("");
+      if (taRef.current) taRef.current.style.height = "auto";
+      return;
+    }
+    // Otherwise submit text
     if (text.trim().length === 0) return;
     onSubmitText(buildPayload());
     setText("");
     if (taRef.current) taRef.current.style.height = "auto";
   };
 
-  const handleFile = (file) => {
+  const handleFile = async (file) => {
     if (!file) return;
-    onUpload({
-      file,
-      complexity,
-      count,
-      aiAutoCount,
-    });
+    const mimeType = file.type || "application/octet-stream";
+    const isPdfFile = mimeType === "application/pdf";
+
+    // Apply size limit: 50 MB for PDFs (page range will be used), 10 MB for others
+    const sizeLimit = isPdfFile ? 52_428_800 : 10_485_760;
+    const sizeLimitLabel = isPdfFile ? "50 MB" : "10 MB";
+    if (file.size > sizeLimit) {
+      setFileSizeError(`File exceeds maximum size of ${sizeLimitLabel}`);
+      return;
+    }
+    setFileSizeError("");
+
+    if (isPdfFile) {
+      // For PDFs: store the file and show PageRangeSelector before submitting
+      try {
+        const base64Data = await fileToBase64(file);
+        setUploadedFile({ file, base64Data, mimeType });
+        setPageRanges({});
+      } catch {
+        setFileSizeError("Failed to read file");
+      }
+    } else {
+      // For non-PDFs: keep existing immediate upload behavior
+      onUpload({
+        file,
+      });
+    }
+  };
+
+  const handleRemoveFile = () => {
+    setUploadedFile(null);
+    setPageRanges({});
+    setFileSizeError("");
+  };
+
+  const handlePageRangeChange = (fileIndex, range) => {
+    if (range === null) {
+      setPageRanges((prev) => {
+        const next = { ...prev };
+        delete next[fileIndex];
+        return next;
+      });
+    } else {
+      setPageRanges((prev) => ({ ...prev, [fileIndex]: range }));
+    }
   };
 
   const handleKey = (e) => {
@@ -2805,7 +2064,7 @@ const MCQComposer = ({ onSubmitText, onUpload, sendOnEnter }) => {  const [text,
   };
 
   return (
-    <div className="mx-auto w-full max-w-3xl px-4 sm:px-6">
+    <div className="mx-auto w-full max-w-4xl px-4 sm:px-6">
       <div className="group relative rounded-2xl border border-zinc-200 bg-white/80 p-2 shadow-[0_12px_40px_rgba(17,24,39,0.06),inset_0_1px_0_rgba(255,255,255,0.9)] backdrop-blur-2xl backdrop-saturate-150 transition-all duration-300 focus-within:border-zinc-400 focus-within:shadow-[0_16px_50px_rgba(17,24,39,0.10),inset_0_1px_0_rgba(255,255,255,1)]">
         <div className="pointer-events-none absolute inset-0 rounded-2xl bg-gradient-to-b from-white/60 to-transparent opacity-70" />
 
@@ -2820,6 +2079,32 @@ const MCQComposer = ({ onSubmitText, onUpload, sendOnEnter }) => {  const [text,
             placeholder="Paste text or upload a file to generate MCQs..."
             className="block max-h-[220px] w-full resize-none bg-transparent px-4 pt-3 pb-2 text-[15px] leading-relaxed text-black placeholder:text-zinc-400 outline-none"
           />
+
+          {/* Uploaded file indicator + PageRangeSelector for PDFs */}
+          {uploadedFile && (
+            <div className="mx-4 mb-2">
+              <div className="flex items-center gap-2 rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-2">
+                <FileText className="h-4 w-4 shrink-0 text-zinc-500" />
+                <span className="min-w-0 flex-1 truncate text-[13px] text-zinc-700">
+                  {uploadedFile.file.name}
+                </span>
+                <button
+                  onClick={handleRemoveFile}
+                  aria-label="Remove file"
+                  className="shrink-0 rounded p-0.5 text-zinc-400 transition hover:bg-zinc-200 hover:text-zinc-700"
+                >
+                  <X className="h-3.5 w-3.5" />
+                </button>
+              </div>
+              {isPdf && (
+                <PageRangeSelector
+                  fileIndex={0}
+                  base64Data={uploadedFile.base64Data}
+                  onRangeChange={handlePageRangeChange}
+                />
+              )}
+            </div>
+          )}
 
           <div className="flex flex-nowrap items-center gap-1 px-1.5 pb-1 pt-1 sm:gap-2 sm:px-2">
             <div className="flex min-w-0 flex-1 flex-nowrap items-center gap-1 overflow-hidden sm:gap-1.5">
@@ -2842,31 +2127,30 @@ const MCQComposer = ({ onSubmitText, onUpload, sendOnEnter }) => {  const [text,
                 <Upload className="h-[14px] w-[14px] sm:h-[15px] sm:w-[15px]" />
                 <span className="hidden sm:inline">Upload</span>
               </button>
-              <ComplexityPicker value={complexity} onChange={setComplexity} />
-              <CountStepper
-                value={count}
-                onChange={setCount}
-                aiAuto={aiAutoCount}
-                onToggleAiAuto={() => setAiAutoCount((v) => !v)}
-              />
+              <ModeSwitcher value={section} onChange={onSectionChange} />
             </div>
 
             <button
               data-testid="generate-mcq"
               onClick={handleSubmit}
-              disabled={text.trim().length === 0}
-              aria-label="Generate MCQs"
+              disabled={!canSubmit}
+              aria-label="Send"
               className={cn(
                 "inline-flex shrink-0 items-center gap-1 rounded-lg px-2 py-1.5 text-[13px] font-semibold transition-all duration-200 sm:gap-2 sm:px-3.5",
-                text.trim().length === 0
+                !canSubmit
                   ? "cursor-not-allowed bg-zinc-100 text-zinc-400"
                   : "bg-black text-white shadow-[0_0_0_1px_rgba(0,0,0,0.1)] hover:bg-zinc-800 active:scale-[0.97]"
               )}
             >
-              <span className="hidden sm:inline">Generate{aiAutoCount ? "" : ` ${count}`} MCQ{aiAutoCount || count !== 1 ? "s" : ""}</span>
+              <span className="hidden sm:inline">Send</span>
               <ArrowUp className="h-[15px] w-[15px]" />
             </button>
           </div>
+          {fileSizeError && (
+            <p data-testid="file-size-error" className="px-4 pt-1 pb-1 text-[12px] text-red-600" role="alert">
+              {fileSizeError}
+            </p>
+          )}
         </div>
       </div>
       <p className="mt-3 text-center text-[11px] text-zinc-500">
@@ -2880,12 +2164,21 @@ const MCQComposer = ({ onSubmitText, onUpload, sendOnEnter }) => {  const [text,
 const DraggableComposer = ({ children }) => {
   const [pos, setPos] = useState(null); // null means default centered at bottom
   const [isCollapsed, setIsCollapsed] = useState(false);
+  const [isMobile, setIsMobile] = useState(false);
   const wrapperRef = useRef(null);
   
   const isDragging = useRef(false);
   const dragStart = useRef({ x: 0, y: 0 });
   const posStart = useRef({ x: 0, y: 0 });
   const [isTransitioning, setIsTransitioning] = useState(false);
+
+  // Detect mobile viewport
+  useEffect(() => {
+    const check = () => setIsMobile(window.innerWidth < 640);
+    check();
+    window.addEventListener("resize", check);
+    return () => window.removeEventListener("resize", check);
+  }, []);
 
   // Helper to keep composer within viewport boundaries
   const clampPosition = () => {
@@ -2980,6 +2273,17 @@ const DraggableComposer = ({ children }) => {
     setTimeout(() => clampPosition(), 550);
   };
 
+  // On mobile, render a simple sticky-bottom composer (no drag)
+  if (isMobile) {
+    return (
+      <div className="composer-safe-bottom sticky bottom-0 z-20 w-full bg-gradient-to-t from-white via-white/95 to-white/0 pb-2 pt-3">
+        <div className="w-full px-1">
+          {children}
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div 
       ref={wrapperRef}
@@ -3009,7 +2313,7 @@ const DraggableComposer = ({ children }) => {
       {/* Content Wrapper */}
       <div className={cn(
         "relative z-30 w-full transition-all duration-500 origin-top ease-[cubic-bezier(0.23,1,0.32,1)] px-4 sm:px-6",
-        isCollapsed ? "max-h-0 opacity-0 scale-90 pointer-events-none" : "max-h-[800px] opacity-100 scale-100 pointer-events-auto max-w-3xl"
+        isCollapsed ? "max-h-0 opacity-0 scale-90 pointer-events-none" : "max-h-[800px] opacity-100 scale-100 pointer-events-auto max-w-4xl"
       )}>
         <div className={cn("mx-auto w-full", isCollapsed ? "w-[100px]" : "w-full")}>
           {children}
@@ -3020,11 +2324,15 @@ const DraggableComposer = ({ children }) => {
 };
 
 /* ---------------- Chat Composer (with model switcher + file upload) ---------------- */
-const ChatComposer = ({ models, onSend, model, onModelChange, sendOnEnter, disabled }) => {
+const ChatComposer = ({ models, onSend, onQuizSubmit, model, onModelChange, sendOnEnter, disabled, section, onSectionChange }) => {
   const [text, setText] = useState("");
   const [files, setFiles] = useState([]); // File[]
+  const [pageRanges, setPageRanges] = useState({}); // keyed by file index
+  const [pdfBase64, setPdfBase64] = useState(null); // base64 for PDF page range selector
   const taRef = useRef(null);
   const fileRef = useRef(null);
+
+  const isMcqMode = section === "mcq";
 
   const handleInput = (e) => {
     setText(e.target.value);
@@ -3044,9 +2352,31 @@ const ChatComposer = ({ models, onSend, model, onModelChange, sendOnEnter, disab
 
   const handleSubmit = () => {
     if (!canSend) return;
-    onSend(text, files);
+
+    if (isMcqMode && onQuizSubmit) {
+      // Route to quiz generation
+      const theFile = files.length > 0 ? files[0] : null;
+      const payload = {
+        text: text.trim(),
+      };
+      if (theFile) {
+        payload.file = theFile;
+        // Include page ranges for PDF files with valid ranges
+        const isPdf = theFile.type === "application/pdf";
+        if (isPdf && pageRanges[0] != null) {
+          payload.pageRanges = { 0: pageRanges[0] };
+        }
+      }
+      onQuizSubmit(payload);
+    } else {
+      // Route to chat
+      onSend(text, files);
+    }
+
     setText("");
     setFiles([]);
+    setPageRanges({});
+    setPdfBase64(null);
     if (taRef.current) taRef.current.style.height = "auto";
     if (fileRef.current) fileRef.current.value = "";
   };
@@ -3061,24 +2391,54 @@ const ChatComposer = ({ models, onSend, model, onModelChange, sendOnEnter, disab
     }
   };
 
-  const handleFilePick = (e) => {
+  const handleFilePick = async (e) => {
     const picked = Array.from(e.target.files || []);
     if (picked.length === 0) return;
-    // Hard cap 4 attachments, total 20MB
-    const MAX_FILES = 4;
-    const MAX_BYTES = 50 * 1024 * 1024;
+    // Hard cap 15 attachments, total 25MB
+    const MAX_FILES = 15;
+    const MAX_BYTES = 25 * 1024 * 1024;
     const merged = [...files, ...picked].slice(0, MAX_FILES);
     const totalBytes = merged.reduce((s, f) => s + (f.size || 0), 0);
     if (totalBytes > MAX_BYTES) {
-      alert("Attachments exceed 50MB total. Please pick smaller files.");
+      alert("Attachments exceed 25MB total. Please pick smaller files.");
       return;
     }
     setFiles(merged);
+    setPageRanges({});
+    setPdfBase64(null);
     if (fileRef.current) fileRef.current.value = "";
+
+    // If in MCQ mode and first file is a PDF, convert to base64 for PageRangeSelector
+    if (isMcqMode && merged.length > 0 && merged[0].type === "application/pdf") {
+      try {
+        const b64 = await fileToBase64(merged[0]);
+        setPdfBase64(b64);
+      } catch {
+        setPdfBase64(null);
+      }
+    }
   };
 
   const removeFile = (idx) => {
     setFiles((prev) => prev.filter((_, i) => i !== idx));
+    setPageRanges((prev) => {
+      const next = { ...prev };
+      delete next[idx];
+      return next;
+    });
+    if (idx === 0) setPdfBase64(null);
+  };
+
+  const handlePageRangeChange = (fileIndex, range) => {
+    if (range === null) {
+      setPageRanges((prev) => {
+        const next = { ...prev };
+        delete next[fileIndex];
+        return next;
+      });
+    } else {
+      setPageRanges((prev) => ({ ...prev, [fileIndex]: range }));
+    }
   };
 
   const formatBytes = (n) => {
@@ -3087,8 +2447,11 @@ const ChatComposer = ({ models, onSend, model, onModelChange, sendOnEnter, disab
     return `${(n / (1024 * 1024)).toFixed(1)} MB`;
   };
 
+  // For MCQ mode with PDF, check if page range is valid
+  const hasPdfWithoutRange = isMcqMode && files.length > 0 && files[0].type === "application/pdf" && pageRanges[0] == null;
+
   return (
-    <div className="mx-auto w-full max-w-3xl px-4 sm:px-6">
+    <div className="mx-auto w-full max-w-4xl px-4 sm:px-6">
       <div className="group relative rounded-2xl border border-zinc-200 bg-white/80 p-2 shadow-[0_12px_40px_rgba(17,24,39,0.06),inset_0_1px_0_rgba(255,255,255,0.9)] backdrop-blur-2xl backdrop-saturate-150 transition-all duration-300 focus-within:border-zinc-400 focus-within:shadow-[0_16px_50px_rgba(17,24,39,0.10),inset_0_1px_0_rgba(255,255,255,1)]">
         <div className="pointer-events-none absolute inset-0 rounded-2xl bg-gradient-to-b from-white/60 to-transparent opacity-70" />
 
@@ -3135,16 +2498,37 @@ const ChatComposer = ({ models, onSend, model, onModelChange, sendOnEnter, disab
             </div>
           )}
 
-          <textarea
-            data-testid="chat-textarea"
-            ref={taRef}
-            rows={1}
-            value={text}
-            onChange={handleInput}
-            onKeyDown={handleKey}
-            placeholder="Ask anything — attach an image or PDF to include context..."
-            className="block max-h-[220px] w-full resize-none bg-transparent px-4 pt-3 pb-2 text-[15px] leading-relaxed text-black placeholder:text-zinc-400 outline-none"
-          />
+          {/* PDF Page Range Selector (shown in MCQ mode when a PDF is attached) */}
+          {isMcqMode && files.length > 0 && files[0].type === "application/pdf" && pdfBase64 && (
+            <div className="mx-4 mb-2">
+              <PageRangeSelector
+                fileIndex={0}
+                base64Data={pdfBase64}
+                onRangeChange={handlePageRangeChange}
+              />
+            </div>
+          )}
+
+          {/* Textarea row with mode badge */}
+          <div className="flex items-start gap-2 px-4 pt-3 pb-2">
+            {/* Mode badge pill — non-removable */}
+            <span
+              data-testid="mode-badge"
+              className="mt-0.5 inline-flex shrink-0 select-none items-center rounded-full bg-amber-100 px-2 py-0.5 text-[11px] font-semibold text-amber-700"
+            >
+              {isMcqMode ? "@MCQ" : "@Chat"}
+            </span>
+            <textarea
+              data-testid="chat-textarea"
+              ref={taRef}
+              rows={1}
+              value={text}
+              onChange={handleInput}
+              onKeyDown={handleKey}
+              placeholder={isMcqMode ? "Paste text or describe what to quiz on..." : "Ask anything — attach an image or PDF to include context..."}
+              className="block max-h-[220px] w-full resize-none bg-transparent text-[15px] leading-relaxed text-black placeholder:text-zinc-400 outline-none"
+            />
+          </div>
 
           <div className="flex flex-wrap items-center justify-between gap-2 px-2 pb-1 pt-1">
             <div className="flex flex-wrap items-center gap-1.5">
@@ -3152,7 +2536,7 @@ const ChatComposer = ({ models, onSend, model, onModelChange, sendOnEnter, disab
                 ref={fileRef}
                 type="file"
                 accept=".pdf,image/*"
-                multiple
+                multiple={!isMcqMode}
                 className="hidden"
                 onChange={handleFilePick}
               />
@@ -3172,15 +2556,17 @@ const ChatComposer = ({ models, onSend, model, onModelChange, sendOnEnter, disab
                 <span className="hidden sm:inline">Attach</span>
               </button>
               <ModelSwitcher models={models} value={model} onChange={onModelChange} />
+              {/* MCQ-specific controls: complexity picker */}
+              <ModeSwitcher value={section} onChange={onSectionChange} />
             </div>
 
             <button
-              data-testid="send-chat"
+              data-testid={isMcqMode ? "generate-mcq" : "send-chat"}
               onClick={handleSubmit}
-              disabled={!canSend}
+              disabled={!canSend || (isMcqMode && hasPdfWithoutRange)}
               className={cn(
                 "inline-flex items-center gap-2 rounded-lg px-3.5 py-1.5 text-[13px] font-semibold transition-all duration-200",
-                !canSend
+                (!canSend || (isMcqMode && hasPdfWithoutRange))
                   ? "cursor-not-allowed bg-zinc-100 text-zinc-400"
                   : "bg-black text-white shadow-[0_0_0_1px_rgba(0,0,0,0.1)] hover:bg-zinc-800 active:scale-[0.97]"
               )}
@@ -3192,7 +2578,7 @@ const ChatComposer = ({ models, onSend, model, onModelChange, sendOnEnter, disab
         </div>
       </div>
       <p className="mt-3 text-center text-[11px] text-zinc-500">
-        Responses may be inaccurate. Verify important information.
+        {isMcqMode ? "Study AI can make mistakes. Verify important information." : "Responses may be inaccurate. Verify important information."}
       </p>
     </div>
   );
@@ -3466,7 +2852,7 @@ const ImageThumbnail = ({ src, alt }) => {
   );
 };
 
-const ChatMessage = ({ role, content, modelName, modelProvider, files, quiz, onRegenerate }) => {
+const ChatMessage = ({ role, content, modelName, modelProvider, files, quiz, isStreaming, onRegenerate }) => {
   const isUser = role === "user";
   const [copied, setCopied] = useState(false);
   const [liked, setLiked] = useState(false);
@@ -3501,28 +2887,37 @@ const ChatMessage = ({ role, content, modelName, modelProvider, files, quiz, onR
       data-testid={`chat-message-${role}`}
       className={cn("flex gap-3", isUser ? "items-center justify-end" : "items-start justify-start")}
     >
+      {/* Bot avatar — hidden on mobile, shown on desktop beside the bubble */}
       {!isUser && (
-        <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-black text-white ring-1 ring-black/10">
+        <div className="hidden h-8 w-8 shrink-0 items-center justify-center rounded-full bg-black text-white ring-1 ring-black/10 sm:flex">
           <Bot className="h-4 w-4" />
         </div>
       )}
       <div
         className={cn(
-          "max-w-[88%] rounded-2xl px-4 py-3 text-[14.5px] leading-relaxed sm:max-w-[80%]",
+          "max-w-full rounded-2xl px-3 py-2.5 text-[14px] leading-relaxed sm:max-w-[85%] sm:px-4 sm:py-3 sm:text-[14.5px]",
           isUser
             ? "bg-black text-white"
             : "border border-zinc-200 bg-white text-zinc-800 shadow-sm"
         )}
       >
-        {!isUser && modelName && (
-          <div className="mb-1 flex items-center gap-1.5 text-[10.5px] font-semibold uppercase tracking-wider text-zinc-500">
-            {modelProvider && (
-              <ProviderIcon
-                provider={modelProvider}
-                className="h-3 w-3 text-black"
-              />
+        {!isUser && (
+          <div className="mb-1.5 flex items-center gap-1.5">
+            {/* Bot avatar — shown inline on mobile only */}
+            <div className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-black text-white sm:hidden">
+              <Bot className="h-3 w-3" />
+            </div>
+            {modelName && (
+              <span className="flex items-center gap-1.5 text-[10.5px] font-semibold uppercase tracking-wider text-zinc-500" style={{ fontStyle: "italic" }}>
+                {modelProvider && (
+                  <ProviderIcon
+                    provider={modelProvider}
+                    className="h-3 w-3 text-black"
+                  />
+                )}
+                {modelName}
+              </span>
             )}
-            {modelName}
           </div>
         )}
 
@@ -3568,19 +2963,8 @@ const ChatMessage = ({ role, content, modelName, modelProvider, files, quiz, onR
           isUser ? (
             <div className="whitespace-pre-wrap">{displayContent}</div>
           ) : (
-            <div className="sa-markdown">
-              <ReactMarkdown
-                remarkPlugins={[remarkGfm]}
-                components={{
-                  table: ({ children, ...props }) => (
-                    <div className="sa-table-wrap">
-                      <table {...props}>{children}</table>
-                    </div>
-                  ),
-                }}
-              >
-                {displayContent}
-              </ReactMarkdown>
+            <div className={cn("sa-markdown overflow-hidden", isStreaming && "sa-streaming")}>
+              <MathMarkdown content={displayContent} />
             </div>
           )
         )}
@@ -3611,8 +2995,9 @@ const ChatMessage = ({ role, content, modelName, modelProvider, files, quiz, onR
           </div>
         )}
       </div>
+      {/* User avatar — hidden on mobile (shown inline inside bubble), shown on desktop beside the bubble */}
       {isUser && (
-        <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-zinc-100 text-zinc-700 ring-1 ring-zinc-200">
+        <div className="hidden h-8 w-8 shrink-0 items-center justify-center rounded-full bg-zinc-100 text-zinc-700 ring-1 ring-zinc-200 sm:flex">
           <User className="h-4 w-4" />
         </div>
       )}
@@ -3679,17 +3064,17 @@ const ChatHero = ({ onPick }) => {
     { text: "Summarize the key causes of WWII", icon: BookOpen },
   ];
   return (
-    <div className="mx-auto flex w-full max-w-3xl flex-col items-center px-5 py-6 text-center sm:px-6 sm:py-10">
+    <div className="mx-auto flex w-full max-w-4xl flex-col items-center px-4 py-4 text-center sm:px-6 sm:py-10">
       {/* Animated logo with pulse */}
-      <div className={cn("relative mb-5 transition-all duration-700 sm:mb-7", mounted ? "opacity-100 translate-y-0" : "opacity-0 translate-y-3")}>
+      <div className={cn("relative mb-4 transition-all duration-700 sm:mb-7", mounted ? "opacity-100 translate-y-0" : "opacity-0 translate-y-3")}>
         <div className="absolute -inset-4 rounded-full bg-gradient-to-br from-zinc-200/40 via-transparent to-zinc-200/40 blur-2xl" />
-        <QuasarLogo className="relative mx-auto h-11 w-11 text-black drop-shadow-lg sm:h-14 sm:w-14" />
+        <QuasarLogo className="relative mx-auto h-9 w-9 text-black drop-shadow-lg sm:h-14 sm:w-14" />
       </div>
 
       {/* Headline with gradient shimmer */}
       <h1
         className={cn(
-          "mx-auto max-w-2xl text-[24px] font-bold leading-[1.1] tracking-tight sm:text-4xl md:text-[44px]",
+          "mx-auto max-w-2xl text-[20px] font-bold leading-[1.15] tracking-tight sm:text-4xl md:text-[44px]",
           "bg-gradient-to-r from-zinc-900 via-zinc-600 to-zinc-900 bg-[length:200%_auto] bg-clip-text text-transparent",
           mounted ? "animate-[sa-hero-gradient_4s_ease-in-out_infinite]" : ""
         )}
@@ -3700,7 +3085,7 @@ const ChatHero = ({ onPick }) => {
 
       {/* Subtitle */}
       <p className={cn(
-        "mt-2 text-[13px] text-zinc-500 transition-all duration-700 delay-200 sm:mt-3 sm:text-[14px]",
+        "mt-1.5 text-[12px] text-zinc-500 transition-all duration-700 delay-200 sm:mt-3 sm:text-[14px]",
         mounted ? "opacity-100 translate-y-0" : "opacity-0 translate-y-2"
       )}>
         Pick a prompt below, or type your own
@@ -3708,7 +3093,7 @@ const ChatHero = ({ onPick }) => {
 
       {/* Prompt pills — two-column grid on mobile, flex-wrap on desktop */}
       <div className={cn(
-        "mt-6 grid w-full grid-cols-1 gap-2 xs:grid-cols-2 sm:mt-8 sm:flex sm:flex-wrap sm:justify-center sm:gap-2.5",
+        "mt-4 grid w-full grid-cols-1 gap-1.5 xs:grid-cols-2 sm:mt-8 sm:flex sm:flex-wrap sm:justify-center sm:gap-2.5",
         "transition-all duration-700 delay-300",
         mounted ? "opacity-100 translate-y-0" : "opacity-0 translate-y-4"
       )}>
@@ -3755,11 +3140,11 @@ const MCQHero = () => {
     "Linear algebra basics",
   ];
   return (
-    <div className="mx-auto w-full max-w-3xl px-5 py-8 text-center sm:px-6">
-      <h1 className="mx-auto max-w-2xl text-[28px] font-semibold leading-[1.15] tracking-tight text-black sm:text-4xl md:text-5xl">
+    <div className="mx-auto w-full max-w-4xl px-4 py-5 text-center sm:px-6 sm:py-8">
+      <h1 className="mx-auto max-w-2xl text-[22px] font-semibold leading-[1.15] tracking-tight text-black sm:text-4xl md:text-5xl">
         {headline}
       </h1>
-      <div className="mt-8 flex flex-wrap justify-center gap-2 md:mt-10">
+      <div className="mt-5 flex flex-wrap justify-center gap-2 sm:mt-8 md:mt-10">
         {suggestions.map((s) => (
           <button
             key={s}
@@ -3807,7 +3192,6 @@ const truncateTitle = (text, max = 50) => {
 
 /* ---------------- Root ---------------- */
 export default function StudyAssistant() {
-  const router = useRouter();
   // Auth state
   const [authUser, setAuthUser] = useState(null);
   const [authLoading, setAuthLoading] = useState(true);
@@ -3845,10 +3229,12 @@ export default function StudyAssistant() {
 
   // Settings (persisted) — start with defaults for SSR, hydrate on mount
   const [settings, setSettings] = useState(DEFAULT_SETTINGS);
+  const [settingsHydrated, setSettingsHydrated] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   useEffect(() => {
     const saved = loadSettings();
     if (saved) setSettings(saved);
+    setSettingsHydrated(true);
   }, []);
   // Auto-fill profile from Google Auth on first login
   useEffect(() => {
@@ -3870,8 +3256,11 @@ export default function StudyAssistant() {
     }
   }, [authUser]);
   useEffect(() => {
+    // Only save AFTER initial hydration to avoid clobbering localStorage
+    // with DEFAULT_SETTINGS during the first render
+    if (!settingsHydrated) return;
     saveSettings(settings);
-  }, [settings]);
+  }, [settings, settingsHydrated]);
 
   // API Keys (from database)
   const [apiKeys, setApiKeys] = useState([]);
@@ -3992,6 +3381,94 @@ export default function StudyAssistant() {
   const [activeQuizTitle, setActiveQuizTitle] = useState("");
   const [mcqLoading, setMcqLoading] = useState(false);
   const [mcqError, setMcqError] = useState(null); // { kind, message }
+  const [quizWarning, setQuizWarning] = useState(null); // non-blocking warning string (e.g., DB save failed)
+  const [quizIncomplete, setQuizIncomplete] = useState(null); // { received: N, requested: M } when quiz is partial
+  const [testSetupOpen, setTestSetupOpen] = useState(false); // Share with Friends modal
+  const [testLink, setTestLink] = useState(null); // Created test link
+  const [showSignInPrompt, setShowSignInPrompt] = useState(false); // Sign-in prompt for unauthenticated share
+  const [examMode, setExamMode] = useState(false); // Exam mode toggle
+
+  // Quiz streaming hook
+  const {
+    questions: streamedQuestions,
+    isStreaming: isQuizStreaming,
+    error: streamError,
+    totalCount: streamTotalCount,
+    quizId: streamQuizId,
+    startStream: startQuizStream,
+    abort: abortQuizStream,
+  } = useQuizStream({
+    onDone: (doneEvent) => {
+      // When streaming completes, show quiz inline (no navigation)
+      if (doneEvent.id) {
+        // Check if incomplete even with a saved ID
+        if (doneEvent.incomplete) {
+          setQuizIncomplete({
+            received: doneEvent.totalCount,
+            requested: null, // we don't always know the requested count here
+          });
+        }
+        // Load the saved quiz from the API for reliable interactive display
+        fetch(buildUrl(`/api/quiz/${doneEvent.id}`))
+          .then((r) => r.json())
+          .then((data) => {
+            if (data.quiz && data.quiz.questions) {
+              setQuestions(normalizeQuestions(data.quiz.questions));
+              setActiveQuizTitle(data.quiz.title || "");
+            }
+          })
+          .catch(() => {
+            // Fallback: use streamed questions if API load fails
+            if (streamedQuestions.length > 0) {
+              setQuestions(normalizeQuestions(streamedQuestions.map((q) => ({ ...q }))));
+            }
+          });
+        setActiveId(doneEvent.id);
+        setMcqLoading(false);
+      } else if (doneEvent.fallbackData && doneEvent.fallbackData.length > 0) {
+        // DB save failed — show questions inline from fallback data
+        setQuestions(normalizeQuestions(doneEvent.fallbackData));
+        setQuizWarning("Quiz generated but could not be saved to history.");
+        if (doneEvent.incomplete) {
+          setQuizIncomplete({
+            received: doneEvent.fallbackData.length,
+            requested: doneEvent.totalCount || null,
+          });
+        }
+        setMcqLoading(false);
+      } else if (doneEvent.incomplete && doneEvent.totalCount > 0) {
+        // Partial stream — no ID, no fallback, but we have streamed questions
+        // The streamedQuestions will be used for display
+        setQuizIncomplete({
+          received: doneEvent.totalCount,
+          requested: null,
+        });
+        setMcqLoading(false);
+      } else if (doneEvent.totalCount === 0) {
+        setMcqError({
+          kind: "generic",
+          message: "No questions could be generated. Try rephrasing or use a richer source.",
+        });
+        setMcqLoading(false);
+      } else {
+        // Done with questions but no ID and no fallback — questions remain in streamedQuestions
+        // They'll be shown via the error/partial rendering path
+        setMcqLoading(false);
+      }
+    },
+    onError: (message) => {
+      // Check if it's an auth error (401-related message)
+      if (message.includes("401") || message.toLowerCase().includes("api key") || message.toLowerCase().includes("unauthorized")) {
+        setMcqError({
+          kind: "auth",
+          message: "Your NanoGPT API key is missing or invalid. Please add a valid key in Settings → API Key.",
+        });
+      } else {
+        setMcqError({ kind: "generic", message });
+      }
+      setMcqLoading(false);
+    },
+  });
 
   // Chat state
   const [messages, setMessages] = useState([]); // {role, content, model, provider}
@@ -4001,6 +3478,9 @@ export default function StudyAssistant() {
   // Dynamic models state
   const [models, setModels] = useState(DEFAULT_MODELS);
   const chatScrollRef = useRef(null);
+  // Mobile hamburger visibility — show on initial load, hide on scroll down, show on scroll up
+  const [hamburgerVisible, setHamburgerVisible] = useState(true);
+  const lastScrollTopRef = useRef(0);
 
   const currentModel = model ? models.find((m) => m.id === model) : null;
 
@@ -4012,34 +3492,96 @@ export default function StudyAssistant() {
     }
   }, []);
 
-  // Keep selected model in sync with settings.defaultModelId when settings change
-  // (only if the user hasn't started chatting in this session)
+  // Fetch preferences from backend and apply (overrides localStorage)
+  // This runs after auth is ready and takes priority
   useEffect(() => {
-    if (messages.length === 0 && !isTyping && settings.defaultModelId) {
-      setModel(settings.defaultModelId);
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [settings.defaultModelId]);
+    if (!authUser) return;
+    (async () => {
+      try {
+        const res = await fetch(buildUrl("/api/user/preferences"));
+        if (res.ok) {
+          const prefs = await res.json();
+          if (prefs.defaultModelId) {
+            setModel(prefs.defaultModelId);
+            setSettings((prev) => ({
+              ...prev,
+              defaultModelId: prefs.defaultModelId,
+              ...(prefs.sendOnEnter !== undefined && { sendOnEnter: prefs.sendOnEnter }),
+            }));
+          } else if (prefs.sendOnEnter !== undefined) {
+            setSettings((prev) => ({ ...prev, sendOnEnter: prefs.sendOnEnter }));
+          }
+        }
+      } catch {
+        /* fallback to localStorage */
+      }
+    })();
+  }, [authUser]);
 
-  // Auto-scroll chat
+  // Simple smooth auto-scroll — respects user manual scrolling
+  const userScrolledUp = useRef(false);
+
+  // Track user scroll intent
   useEffect(() => {
-    if (chatScrollRef.current) {
-      chatScrollRef.current.scrollTop = chatScrollRef.current.scrollHeight;
-    }
+    const el = chatScrollRef.current;
+    if (!el) return;
+
+    const checkIfAtBottom = () => {
+      const distFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
+      userScrolledUp.current = distFromBottom > 100;
+    };
+
+    // User scrolling up = pause auto-scroll
+    el.addEventListener("scroll", checkIfAtBottom, { passive: true });
+    return () => el.removeEventListener("scroll", checkIfAtBottom);
+  }, []);
+
+  // Auto-scroll to bottom when new content arrives (only if user hasn't scrolled up)
+  useEffect(() => {
+    const el = chatScrollRef.current;
+    if (!el || userScrolledUp.current) return;
+
+    el.scrollTo({ top: el.scrollHeight, behavior: "smooth" });
   }, [messages, isTyping]);
+
+  // Hide hamburger on scroll down, show on scroll up (mobile UX)
+  useEffect(() => {
+    const el = chatScrollRef.current;
+    if (!el) return;
+    const onScroll = () => {
+      const current = el.scrollTop;
+      const last = lastScrollTopRef.current;
+      const delta = current - last;
+      // Threshold to ignore tiny jitters
+      if (Math.abs(delta) < 6) return;
+      if (current <= 4) {
+        // At the very top, always show
+        setHamburgerVisible(true);
+      } else if (delta > 0) {
+        // Scrolling down → hide
+        setHamburgerVisible(false);
+      } else {
+        // Scrolling up → show
+        setHamburgerVisible(true);
+      }
+      lastScrollTopRef.current = current;
+    };
+    el.addEventListener("scroll", onScroll, { passive: true });
+    return () => el.removeEventListener("scroll", onScroll);
+  }, []);
 
   /* --- MCQ handlers ---
    * startQuiz(payload) wires the MCQ composer to the backend's
-   * `POST /api/generate-quiz` endpoint. Payload shapes:
-   *   { text, complexity, count, aiAutoCount }
-   *   { file, complexity, count, aiAutoCount }
-   * We pass the generation hints (complexity/count/aiAutoCount) through as
-   * structured text appended to the prompt so existing `/api/generate-quiz`
-   * contracts don't need to change.
+   * `POST /api/generate-quiz` endpoint via SSE streaming.
+   * Payload shapes:
+   *   { text, complexity }
+   *   { file, complexity }
+   * Complexity is sent as a structured JSON field to the backend.
+   * The AI always decides the optimal number of questions.
    */
   const startQuiz = async (payload) => {
     const p = payload && typeof payload === "object" ? payload : {};
-    const modelId = currentModel.id;
+    const modelId = currentModel?.id || "gemini-2.5-flash";
 
     // Derive prompt text + file list
     const userText = typeof p.text === "string" ? p.text.trim() : "";
@@ -4061,25 +3603,14 @@ export default function StudyAssistant() {
       setActiveId(newId);
     }
 
-    // Compose prompt with generation hints
-    const hints = [];
-    if (p.complexity) {
-      const complexityPrompts = {
-        recall: "Generate questions that test REMEMBERING and UNDERSTANDING only. Ask students to identify definitions, recall facts, list key terms, recognize correct statements, or match concepts. Questions should have one clearly correct factual answer. Distractors should be plausible but factually wrong. Suitable for: class tests, quick revision checks.",
-        apply: "Generate questions that test APPLICATION of knowledge. Present real-world scenarios, case studies, or practical situations where the student must USE learned concepts to solve a problem or predict an outcome. Each question should require the student to transfer knowledge to a new context — not just recall it. Distractors should represent common mistakes students make when applying the concept incorrectly. Suitable for: mid-term exams, assignment-level thinking.",
-        analyze: "Generate questions that test ANALYSIS and EVALUATION. Require students to break down complex information, compare and contrast ideas, identify cause-effect relationships, distinguish between similar concepts, find patterns, or evaluate the strengths and weaknesses of an argument. Questions should demand multi-step reasoning — the answer should NOT be directly stated in the source material. Include distractors that represent partial analysis or common logical errors. Suitable for: final exams, competitive preparation.",
-        mastery: "Generate RESEARCH-LEVEL questions that test the HIGHEST cognitive abilities: evaluation, synthesis, and creation. Questions should require the student to critically evaluate competing theories, synthesize information from multiple angles, propose novel solutions, or judge the validity of complex arguments. Think like a university professor designing questions for graduate-level comprehensive exams. Each question should be challenging enough that surface-level understanding will fail — only deep, interconnected knowledge of the topic will lead to the correct answer. Distractors should be sophisticated and represent advanced misconceptions. Suitable for: research aptitude tests, graduate entrance exams, olympiad-level challenges."
-      };
-      hints.push(`Complexity rules: ${complexityPrompts[p.complexity] || p.complexity}`);
-    }
-    if (p.aiAutoCount) hints.push("Pick the optimal number of questions yourself.");
-    else if (p.count) hints.push(`Generate exactly ${p.count} MCQs.`);
-    const hintLine = hints.length > 0 ? `\n\n[${hints.join(" ")}]` : "";
-    const promptText = (userText || (theFile ? `Generate an MCQ quiz from the attached file "${theFile.name}".` : "")) + hintLine;
+    // Compose clean prompt text (no appended metadata — complexity/count sent as structured fields)
+    const promptText = userText || (theFile ? `Generate an MCQ quiz from the attached file "${theFile.name}".` : "");
 
     setQuestions([]);
     setAnswers({});
     setMcqError(null);
+    setQuizWarning(null);
+    setQuizIncomplete(null);
     setMcqLoading(true);
 
     requestAnimationFrame(() => {
@@ -4090,53 +3621,16 @@ export default function StudyAssistant() {
 
     try {
       const fileParts = theFile ? await filesToInlineParts([theFile]) : [];
-      const { status, ok, data } = await postGenerateQuiz({
+      const streamPayload = {
         text: promptText,
         files: fileParts,
         modelId,
-      });
-
-      if (status === 401) {
-        setMcqError({
-          kind: "auth",
-          message:
-            "Your NanoGPT API key is missing or invalid. Please add a valid key in Settings → API Key.",
-        });
-        setMcqLoading(false);
-        return;
+      };
+      // Include page ranges if provided (only for PDFs with valid ranges)
+      if (p.pageRanges && Object.keys(p.pageRanges).length > 0) {
+        streamPayload.pageRanges = p.pageRanges;
       }
-
-      if (!ok) {
-        const backendMsg =
-          (data && (data.error || data.message || data.detail)) ||
-          `Request failed with status ${status}.`;
-        setMcqError({ kind: "generic", message: String(backendMsg) });
-        setMcqLoading(false);
-        return;
-      }
-
-      const quiz = extractQuizQuestions(data);
-      if (!quiz || quiz.length === 0) {
-        setMcqError({
-          kind: "generic",
-          message:
-            "The backend did not return any questions. Try rephrasing or use a richer source.",
-        });
-        setMcqLoading(false);
-        return;
-      }
-
-      if (quiz && quiz.length > 0 && data.id) {
-        setMcqLoading(false);
-        router.push(`/mcq/${data.id}`);
-        return;
-      }
-
-      setMcqError({
-        kind: "generic",
-        message: "The backend generated a quiz but did not return a valid ID to navigate to."
-      });
-      setMcqLoading(false);
+      startQuizStream(streamPayload);
     } catch (err) {
       setMcqError({
         kind: "generic",
@@ -4151,12 +3645,16 @@ export default function StudyAssistant() {
     setAnswers((prev) => ({ ...prev, [i]: opt }));
   };
   const handleResetQuiz = () => {
+    abortQuizStream();
     setQuestions([]);
     setAnswers({});
     setActiveQuizTitle("");
     setActiveId(null);
     setMcqError(null);
+    setQuizWarning(null);
+    setQuizIncomplete(null);
     setMcqLoading(false);
+    setExamMode(false);
   };
 
   // Retake the same quiz — keep questions, just clear answers.
@@ -4234,6 +3732,7 @@ export default function StudyAssistant() {
       content: textStr,
       files: fileMeta,
     };
+    userScrolledUp.current = false; // Resume auto-scroll on new message
     setMessages((prev) => [...prev, userMsg]);
     setIsTyping(true);
     const modelName = currentModel.name;
@@ -4537,7 +4036,26 @@ export default function StudyAssistant() {
         setMessages(loaded);
       }
     } else {
-      router.push(`/mcq/${id}`);
+      // Load quiz inline instead of navigating to /mcq/{id}
+      setQuestions([]);
+      setAnswers({});
+      setMcqError(null);
+      setQuizWarning(null);
+      setQuizIncomplete(null);
+      setMcqLoading(true);
+      try {
+        const res = await fetch(buildUrl(`/api/quiz/${id}`));
+        const data = await res.json();
+        if (data.quiz && data.quiz.questions) {
+          setQuestions(normalizeQuestions(data.quiz.questions));
+          setActiveQuizTitle(data.quiz.title || "");
+        } else {
+          setMcqError({ kind: "generic", message: "Could not load quiz." });
+        }
+      } catch {
+        setMcqError({ kind: "generic", message: "Failed to load quiz from server." });
+      }
+      setMcqLoading(false);
     }
     if (isMobile()) setSidebarOpen(false);
   };
@@ -4558,8 +4076,35 @@ export default function StudyAssistant() {
   };
 
   /* --- Settings handlers --- */
-  const handleSaveSettings = (next) => {
+  const handleSaveSettings = async (next) => {
     setSettings(next);
+    // Persist preferences to backend (tied to user account)
+    try {
+      await fetch(buildUrl("/api/user/preferences"), {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          defaultModelId: next.defaultModelId,
+          sendOnEnter: next.sendOnEnter,
+        }),
+      });
+    } catch {
+      /* localStorage fallback already handled by the useEffect */
+    }
+  };
+
+  // Wrapper: when user picks a model from the switcher, persist it as their default
+  const handleModelChange = (newModelId) => {
+    setModel(newModelId);
+    setSettings((prev) => ({ ...prev, defaultModelId: newModelId }));
+    // Fire-and-forget backend persistence (only if authenticated)
+    if (authUser) {
+      fetch(buildUrl("/api/user/preferences"), {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ defaultModelId: newModelId }),
+      }).catch(() => { /* localStorage fallback handled by useEffect */ });
+    }
   };
   const handleClearAllChats = async () => {
     try {
@@ -4592,7 +4137,7 @@ export default function StudyAssistant() {
   const hasQuiz = questions.length > 0;
 
   return (
-    <div className="relative min-h-screen w-full overflow-hidden bg-white text-black antialiased">
+    <div className="relative w-full overflow-hidden bg-white text-black antialiased" style={{ minHeight: 'var(--app-height, 100vh)' }}>
       {/* Subtle dotted texture */}
       <div className="pointer-events-none fixed inset-0">
         <div
@@ -4605,7 +4150,7 @@ export default function StudyAssistant() {
         />
       </div>
 
-      <div className="relative flex h-screen w-full">
+      <div className="relative flex w-full" style={{ height: 'var(--app-height, 100vh)' }}>
         <Sidebar
           open={sidebarOpen}
           onToggle={() => setSidebarOpen((v) => !v)}
@@ -4623,13 +4168,8 @@ export default function StudyAssistant() {
           onLogout={handleLogout}
         />
 
-        <main className="relative flex h-screen min-w-0 flex-1 flex-col">
-          {/* Floating Chat / MCQ switcher — no full-width header so it won't clash with browser chrome */}
-          <div className="pointer-events-none absolute inset-x-0 top-3 z-20 flex justify-center sm:top-4">
-            <div className="pointer-events-auto">
-              <SectionTabs section={section} onChange={handleSectionChange} />
-            </div>
-          </div>
+        <main className="relative flex min-w-0 flex-1 flex-col" style={{ height: 'var(--app-height, 100vh)' }}>
+
 
           {/* Mobile-only sidebar trigger — shown when drawer is closed on small screens */}
           {!sidebarOpen && (
@@ -4637,7 +4177,13 @@ export default function StudyAssistant() {
               data-testid="mobile-menu"
               onClick={() => setSidebarOpen(true)}
               aria-label="Open sidebar"
-              className="absolute left-3 top-3 z-20 flex h-9 w-9 items-center justify-center rounded-lg border border-zinc-200 bg-white text-zinc-700 shadow-sm transition hover:border-zinc-400 hover:text-black sm:hidden"
+              aria-hidden={!hamburgerVisible}
+              className={cn(
+                "absolute left-3 top-3 z-20 flex h-9 w-9 items-center justify-center rounded-lg border border-zinc-200/40 bg-white/40 text-zinc-700 shadow-sm backdrop-blur-md transition-all duration-300 ease-out hover:border-zinc-400 hover:bg-white/60 hover:text-black sm:hidden",
+                hamburgerVisible
+                  ? "translate-y-0 opacity-100 pointer-events-auto"
+                  : "-translate-y-2 opacity-0 pointer-events-none"
+              )}
             >
               <Menu className="h-[18px] w-[18px]" />
             </button>
@@ -4651,12 +4197,12 @@ export default function StudyAssistant() {
             {section === "chat" ? (
               <>
                 {!hasChat && (
-                  <div className="flex flex-1 items-center justify-center px-4 py-8">
+                  <div className="flex flex-1 items-end justify-center px-2 pb-2 pt-14 sm:items-center sm:px-4 sm:py-8">
                     <ChatHero onPick={handleSend} />
                   </div>
                 )}
                 {hasChat && (
-                  <div className="mx-auto w-full max-w-3xl space-y-5 px-4 pb-48 pt-20 sm:px-6">
+                  <div className="mx-auto w-full max-w-4xl space-y-5 px-3 pb-36 pt-16 sm:px-6 sm:pb-48 sm:pt-20">
                     {messages.map((m, i) =>
                       m.role === "error" ? (
                         <ChatErrorBubble
@@ -4674,6 +4220,7 @@ export default function StudyAssistant() {
                           modelProvider={m.provider}
                           files={m.files}
                           quiz={m.quiz}
+                          isStreaming={isTyping && m.role === "assistant" && i === messages.length - 1}
                           onRegenerate={i === messages.length - 1 ? handleRegenerate : undefined}
                         />
                       )
@@ -4686,16 +4233,160 @@ export default function StudyAssistant() {
               </>
             ) : (
               <>
-                {!hasQuiz && !mcqLoading && !mcqError && (
-                  <div className="flex flex-1 items-center justify-center px-4 py-8">
+                {!hasQuiz && !mcqLoading && !isQuizStreaming && !mcqError && !(quizIncomplete && streamedQuestions.length > 0) && (
+                  <div className="flex flex-1 items-end justify-center px-2 pb-2 pt-14 sm:items-center sm:px-4 sm:py-8">
                     <MCQHero />
                   </div>
                 )}
                 <div id="quiz-anchor" />
-                {mcqLoading && (
+                {/* Fallback quiz display — when questions are loaded inline (DB save failed or incomplete) */}
+                {hasQuiz && !isQuizStreaming && (
+                  <div className="mx-auto w-full max-w-4xl px-4 pb-36 pt-16 sm:px-6 sm:pb-48 sm:pt-20">
+                    {examMode ? (
+                      <ExamModeView
+                        questions={questions}
+                        durationSeconds={questions.length * 60}
+                        onExit={() => setExamMode(false)}
+                      />
+                    ) : (
+                    <>
+                    {/* Warning banner: quiz not saved to history */}
+                    {quizWarning && (
+                      <div className="mb-4 flex items-center gap-3 rounded-lg border border-amber-200 bg-amber-50/70 px-4 py-3">
+                        <AlertTriangle className="h-4 w-4 shrink-0 text-amber-600" />
+                        <span className="flex-1 text-[13px] font-medium text-amber-800">
+                          {quizWarning}
+                        </span>
+                        <button
+                          onClick={() => setQuizWarning(null)}
+                          className="shrink-0 rounded p-0.5 text-amber-600 transition hover:bg-amber-100 hover:text-amber-800"
+                          aria-label="Dismiss warning"
+                        >
+                          <X className="h-3.5 w-3.5" />
+                        </button>
+                      </div>
+                    )}
+                    {/* Incomplete quiz indicator */}
+                    {quizIncomplete && (
+                      <div className="mb-4 flex items-center gap-3 rounded-lg border border-blue-200 bg-blue-50/70 px-4 py-3">
+                        <AlertTriangle className="h-4 w-4 shrink-0 text-blue-600" />
+                        <span className="text-[13px] font-medium text-blue-800">
+                          Partial quiz: {quizIncomplete.received} question{quizIncomplete.received === 1 ? "" : "s"} generated (generation was interrupted)
+                        </span>
+                      </div>
+                    )}
+                    {/* Interactive quiz cards */}
+                    <MCQCardUI
+                      questions={questions}
+                      answers={answers}
+                      onAnswer={handleAnswer}
+                      mode="practice"
+                    />
+                    {/* Reset button + Exam Mode + Share with Friends */}
+                    <div className="mt-6 flex flex-wrap justify-center gap-3">
+                      <button
+                        onClick={handleResetQuiz}
+                        className="inline-flex items-center gap-2 rounded-lg border border-zinc-200 bg-white px-4 py-2 text-[13px] font-medium text-zinc-700 shadow-sm transition hover:border-zinc-400 hover:text-black"
+                      >
+                        <RotateCcw className="h-3.5 w-3.5" />
+                        New Quiz
+                      </button>
+                      <button
+                        data-testid="exam-mode-btn"
+                        onClick={() => setExamMode(true)}
+                        className="inline-flex items-center gap-2 rounded-lg border border-indigo-600 bg-indigo-600 px-4 py-2 text-[13px] font-medium text-white shadow-sm transition hover:bg-indigo-700"
+                      >
+                        <Clock className="h-3.5 w-3.5" />
+                        Exam Mode
+                      </button>
+                      {activeId && questions.length > 0 && (
+                        <button
+                          data-testid="share-with-friends-btn"
+                          onClick={() => {
+                            if (!authUser) {
+                              setShowSignInPrompt(true);
+                            } else {
+                              setTestSetupOpen(true);
+                            }
+                          }}
+                          className="inline-flex items-center gap-2 rounded-lg border border-zinc-900 bg-zinc-900 px-4 py-2 text-[13px] font-medium text-white shadow-sm transition hover:bg-zinc-800"
+                        >
+                          <Share2 className="h-3.5 w-3.5" />
+                          Share with Friends
+                        </button>
+                      )}
+                    </div>
+                    {/* Sign-in prompt for unauthenticated users */}
+                    {showSignInPrompt && (
+                      <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm">
+                        <div className="mx-4 w-full max-w-sm rounded-xl border border-zinc-200 bg-white p-6 shadow-2xl">
+                          <div className="mb-4 flex items-center gap-3">
+                            <span className="flex h-10 w-10 items-center justify-center rounded-full bg-zinc-100">
+                              <LogIn className="h-5 w-5 text-zinc-600" />
+                            </span>
+                            <div>
+                              <h3 className="text-[15px] font-semibold text-zinc-900">Sign in required</h3>
+                              <p className="text-[13px] text-zinc-500">Please sign in to share quizzes</p>
+                            </div>
+                          </div>
+                          <p className="mb-5 text-[13px] text-zinc-600">
+                            You need to be signed in to generate shareable quiz links for your friends.
+                          </p>
+                          <div className="flex gap-3">
+                            <button
+                              onClick={() => setShowSignInPrompt(false)}
+                              className="flex-1 rounded-lg border border-zinc-200 bg-white px-4 py-2 text-[13px] font-medium text-zinc-700 transition hover:bg-zinc-50"
+                            >
+                              Cancel
+                            </button>
+                            <button
+                              onClick={() => { window.location.href = "/login"; }}
+                              className="flex-1 rounded-lg border border-zinc-900 bg-zinc-900 px-4 py-2 text-[13px] font-medium text-white transition hover:bg-zinc-800"
+                            >
+                              Sign in
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+                    )}
+                    {/* Share with Friends Setup Form Modal */}
+                    {testSetupOpen && activeId && (
+                      <SetupForm
+                        quizId={activeId}
+                        mcqCount={questions.length}
+                        onCreated={(link) => setTestLink(link)}
+                        onClose={() => { setTestSetupOpen(false); setTestLink(null); }}
+                      />
+                    )}
+                    </>
+                    )}
+                  </div>
+                )}
+                {/* Streaming progress indicator + progressive questions */}
+                {isQuizStreaming && (
+                  <div className="mx-auto w-full max-w-4xl px-4 pb-36 pt-16 sm:px-6 sm:pb-48 sm:pt-20">
+                    {/* Progress indicator */}
+                    <div className="mb-4 flex items-center gap-3 rounded-lg border border-zinc-200 bg-zinc-50/70 px-4 py-3">
+                      <Loader2 className="h-4 w-4 animate-spin text-zinc-600" />
+                      <span className="text-[13px] font-medium text-zinc-700">
+                        {streamedQuestions.length === 0
+                          ? `Generating your quiz${currentModel ? ` with ${currentModel.name}` : ""}...`
+                          : `${streamedQuestions.length} question${streamedQuestions.length === 1 ? "" : "s"} generated...`}
+                      </span>
+                    </div>
+                    {/* Progressive question cards — uses MCQCardUI in practice mode */}
+                    <MCQCardUI
+                      questions={streamedQuestions}
+                      answers={answers}
+                      onAnswer={handleAnswer}
+                      mode="practice"
+                    />
+                  </div>
+                )}
+                {mcqLoading && !isQuizStreaming && (
                   <div
                     data-testid="mcq-loading"
-                    className="mx-auto flex w-full max-w-3xl flex-1 flex-col items-center justify-center gap-4 px-4 py-8 sm:px-6"
+                    className="mx-auto flex w-full max-w-4xl flex-1 flex-col items-center justify-center gap-4 px-4 py-8 sm:px-6"
                   >
                     <div className="flex h-12 w-12 items-center justify-center rounded-full bg-black text-white">
                       <Loader2 className="h-5 w-5 animate-spin" />
@@ -4711,10 +4402,10 @@ export default function StudyAssistant() {
                     </div>
                   </div>
                 )}
-                {!mcqLoading && mcqError && (
+                {!mcqLoading && !isQuizStreaming && mcqError && (
                   <div
                     data-testid="mcq-error"
-                    className="mx-auto w-full max-w-3xl px-4 pt-24 sm:px-6"
+                    className="mx-auto w-full max-w-4xl px-4 pt-24 sm:px-6"
                   >
                     <div className="flex gap-3 rounded-xl border border-red-200 bg-red-50/70 p-4">
                       <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-red-100 text-red-700 ring-1 ring-red-200">
@@ -4729,6 +4420,12 @@ export default function StudyAssistant() {
                         <p className="mt-0.5 text-[13.5px] leading-relaxed text-red-800">
                           {mcqError.message}
                         </p>
+                        {/* Show any partial questions received before error */}
+                        {streamedQuestions.length > 0 && (
+                          <p className="mt-1 text-[12px] text-red-600">
+                            Showing {streamedQuestions.length} question{streamedQuestions.length === 1 ? "" : "s"} received before the error.
+                          </p>
+                        )}
                         <div className="mt-2 flex flex-wrap gap-2">
                           {mcqError.kind === "auth" && (
                             <button
@@ -4750,6 +4447,46 @@ export default function StudyAssistant() {
                         </div>
                       </div>
                     </div>
+                    {/* Render partial questions in interactive state on error */}
+                    {streamedQuestions.length > 0 && !hasQuiz && (
+                      <div className="mt-6">
+                        <MCQCardUI
+                          questions={streamedQuestions}
+                          answers={answers}
+                          onAnswer={handleAnswer}
+                          mode="practice"
+                        />
+                      </div>
+                    )}
+                  </div>
+                )}
+                {/* Incomplete stream display — when stream ended incomplete, no error, partial questions available */}
+                {!mcqLoading && !isQuizStreaming && !mcqError && !hasQuiz && quizIncomplete && streamedQuestions.length > 0 && (
+                  <div className="mx-auto w-full max-w-4xl px-4 pb-36 pt-16 sm:px-6 sm:pb-48 sm:pt-20">
+                    {/* Incomplete indicator */}
+                    <div className="mb-4 flex items-center gap-3 rounded-lg border border-blue-200 bg-blue-50/70 px-4 py-3">
+                      <AlertTriangle className="h-4 w-4 shrink-0 text-blue-600" />
+                      <span className="text-[13px] font-medium text-blue-800">
+                        Partial quiz: {quizIncomplete.received} question{quizIncomplete.received === 1 ? "" : "s"} generated (generation was interrupted)
+                      </span>
+                    </div>
+                    {/* Interactive partial questions */}
+                    <MCQCardUI
+                      questions={streamedQuestions}
+                      answers={answers}
+                      onAnswer={handleAnswer}
+                      mode="practice"
+                    />
+                    {/* Reset button */}
+                    <div className="mt-6 flex justify-center">
+                      <button
+                        onClick={handleResetQuiz}
+                        className="inline-flex items-center gap-2 rounded-lg border border-zinc-200 bg-white px-4 py-2 text-[13px] font-medium text-zinc-700 shadow-sm transition hover:border-zinc-400 hover:text-black"
+                      >
+                        <RotateCcw className="h-3.5 w-3.5" />
+                        New Quiz
+                      </button>
+                    </div>
                   </div>
                 )}
               </>
@@ -4758,22 +4495,17 @@ export default function StudyAssistant() {
 
           {/* Draggable Composer */}
           <DraggableComposer>
-            {section === "chat" ? (
               <ChatComposer
                 models={models}
                 onSend={handleSend}
+                onQuizSubmit={startQuiz}
                 model={model}
-                onModelChange={setModel}
+                onModelChange={handleModelChange}
                 sendOnEnter={settings.sendOnEnter}
                 disabled={isTyping}
+                section={section}
+                onSectionChange={setSection}
               />
-            ) : (
-              <MCQComposer
-                onSubmitText={startQuiz}
-                onUpload={startQuiz}
-                sendOnEnter={settings.sendOnEnter}
-              />
-            )}
           </DraggableComposer>
         </main>
       </div>

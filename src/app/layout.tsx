@@ -1,6 +1,7 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import { Geist, Geist_Mono, Manrope } from "next/font/google";
 import AuthProvider from "@/components/AuthProvider";
+import "katex/dist/katex.min.css";
 import "./globals.css";
 
 const geistSans = Geist({
@@ -21,6 +22,13 @@ const manrope = Manrope({
 export const metadata: Metadata = {
   title: "Study Buddy — Your Intelligent Study Companion",
   description: "AI-powered study assistant with chat, MCQ generation, and multiple AI models",
+};
+
+export const viewport = {
+  width: "device-width",
+  initialScale: 1,
+  maximumScale: 1,
+  interactiveWidget: "resizes-content",
 };
 
 export default function RootLayout({

@@ -11,18 +11,21 @@ datasource db {
 // ========================
 
 model User {
-  id            String          @id @default(cuid())
-  name          String?
-  email         String?         @unique
-  emailVerified DateTime?
-  image         String?
-  accounts      Account[]
-  sessions      Session[]
-  conversations Conversation[]
-  quizzes       Quiz[]
-  apiKeys       ApiKey[]
-  createdAt     DateTime        @default(now())
-  updatedAt     DateTime        @updatedAt
+  id                 String           @id @default(cuid())
+  name               String?
+  email              String?          @unique
+  emailVerified      DateTime?
+  image              String?
+  accounts           Account[]
+  sessions           Session[]
+  conversations      Conversation[]
+  quizzes            Quiz[]
+  apiKeys            ApiKey[]
+  preferences        UserPreferences?
+  testSessions       TestSession[]    @relation("OwnedTestSessions")
+  testAttemptsAsUser TestAttempt[]    @relation("TestAttemptsByUser")
+  createdAt          DateTime         @default(now())
+  updatedAt          DateTime         @updatedAt
 }
 
 model Account {
@@ -68,13 +71,17 @@ model ApiKey {
 }
 
 model Quiz {
-  id           String         @id @default(cuid())
-  title        String
-  originalText String
-  userId       String?
-  user         User?          @relation(fields: [userId], references: [id], onDelete: Cascade)
-  questions    QuizQuestion[]
-  createdAt    DateTime       @default(now())
+  id             String         @id @default(cuid())
+  title          String
+  originalText   String
+  complexity     String?
+  requestedCount Int?
+  userId         String?
+  user           User?          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  questions      QuizQuestion[]
+  testSessions   TestSession[]
+  testAttempts   TestAttempt[]
+  createdAt      DateTime       @default(now())
 }
 
 model QuizQuestion {
@@ -108,4 +115,60 @@ model Message {
   conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
   conversationId String
   createdAt      DateTime     @default(now())
+}
+
+model UserPreferences {
+  id             String   @id @default(cuid())
+  userId         String   @unique
+  user           User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  defaultModelId String?
+  sendOnEnter    Boolean  @default(true)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+}
+
+// ========================
+// Test Mode (Proctored Quiz) Models
+// ========================
+
+model TestSession {
+  id              String        @id @default(cuid())
+  token           String        @unique
+  quizId          String
+  quiz            Quiz          @relation(fields: [quizId], references: [id], onDelete: Cascade)
+  ownerUserId     String
+  owner           User          @relation("OwnedTestSessions", fields: [ownerUserId], references: [id], onDelete: Cascade)
+  durationSeconds Int
+  status          String        @default("active") // 'active' | 'expired'
+  expiresAt       DateTime
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+  attempts        TestAttempt[]
+
+  @@index([quizId])
+  @@index([ownerUserId])
+  @@index([status, expiresAt])
+}
+
+model TestAttempt {
+  id              String      @id @default(cuid())
+  testSessionId   String
+  testSession     TestSession @relation(fields: [testSessionId], references: [id], onDelete: Cascade)
+  quizId          String
+  quiz            Quiz        @relation(fields: [quizId], references: [id], onDelete: Cascade)
+  takerIdentifier String
+  userId          String?
+  user            User?       @relation("TestAttemptsByUser", fields: [userId], references: [id], onDelete: SetNull)
+  status          String      @default("in_progress") // 'in_progress' | 'submitted' | 'disqualified'
+  reason          String? // 'user_submitted' | 'time_expired' | violation reason
+  score           Int?
+  percentage      Float?
+  answers         String      @default("{}") // JSON: { quizQuestionId: selectedOption }
+  startedAt       DateTime    @default(now())
+  elapsedSeconds  Int?
+  submittedAt     DateTime?
+  createdAt       DateTime    @default(now())
+
+  @@index([testSessionId, takerIdentifier])
+  @@index([testSessionId, status])
 }

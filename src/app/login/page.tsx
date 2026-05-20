@@ -27,7 +27,7 @@ import {
  * If `onGoogle` is not provided, runs in demo mode with a 1.2 s mock flow.
  * ====================================================================== */
 
-const cn = (...cls) => cls.filter(Boolean).join(" ");
+const cn = (...cls: (string | boolean | undefined | null)[]) => cls.filter(Boolean).join(" ");
 
 /* ---------------- Monochrome "G" glyph (not the official Google logo) ---------------- */
 const GoogleGlyph = ({ className = "h-[18px] w-[18px]" }) => (
@@ -107,8 +107,8 @@ const BrandPanel = () => {
   }, [typed, deleting, taglineIdx]);
 
   // Mouse-reactive dot grid
-  const gridRef = useRef(null);
-  const onMove = (e) => {
+  const gridRef = useRef<HTMLDivElement>(null);
+  const onMove = (e: React.MouseEvent<HTMLDivElement>) => {
     const el = gridRef.current;
     if (!el) return;
     const rect = el.getBoundingClientRect();

@@ -45,3 +45,5 @@ next-env.d.ts
 # SQLite database
 dev.db
 dev.db-journal
+
+public/uploads/

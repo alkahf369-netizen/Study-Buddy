@@ -206,9 +206,48 @@ code {
   .sa-eq-bar,
   .sa-shimmer-text,
   .sa-ping-ring,
-  .sa-breathe {
+  .sa-breathe,
+  .sa-blob-svg,
+  .sa-blob-halo,
+  .sa-orbit-dot {
     animation: none !important;
   }
+}
+
+/* ================================================================
+   Image Generation Loader — modern morphing blob
+   ================================================================ */
+
+/* Slow rotation on the blob SVG itself for extra organic feel */
+.sa-blob-svg {
+  animation: sa-blob-rotate 18s linear infinite;
+  filter: drop-shadow(0 8px 24px rgba(0, 0, 0, 0.12));
+}
+
+@keyframes sa-blob-rotate {
+  from { transform: rotate(0deg); }
+  to   { transform: rotate(360deg); }
+}
+
+/* Soft halo behind the blob — pulses gently */
+.sa-blob-halo {
+  animation: sa-blob-halo-pulse 3s ease-in-out infinite;
+}
+
+@keyframes sa-blob-halo-pulse {
+  0%, 100% { opacity: 0.4; transform: scale(1); }
+  50%      { opacity: 0.8; transform: scale(1.15); }
+}
+
+/* Tiny dot orbiting around the blob */
+.sa-orbit-dot {
+  animation: sa-orbit-spin 4s linear infinite;
+  transform-origin: center;
+}
+
+@keyframes sa-orbit-spin {
+  0%   { transform: translate(-50%, -50%) rotate(0deg) translateX(95px) rotate(0deg); }
+  100% { transform: translate(-50%, -50%) rotate(360deg) translateX(95px) rotate(-360deg); }
 }
 
 /* --- Scroll lock utility --- */
@@ -422,6 +461,15 @@ code {
 
 .sa-markdown a:hover {
   color: #1d4ed8;
+}
+
+/* Images (generated images rendered via markdown) */
+.sa-markdown img {
+  max-width: 100%;
+  border-radius: 0.75rem;
+  border: 1px solid #e4e4e7;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.06);
+  margin: 0.5em 0;
 }
 
 /* ============================================================
@@ -817,5 +865,37 @@ code {
 @supports (height: 1dvh) {
   .composer-safe-bottom {
     padding-bottom: env(safe-area-inset-bottom, 0px);
+  }
+}
+
+
+/* ============================================================
+   Dropdown smooth open — used by model & image pickers
+   ============================================================ */
+@keyframes dropdownIn {
+  from {
+    opacity: 0;
+    transform: translateY(-6px) scale(0.96);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes dropdownInCenter {
+  from {
+    opacity: 0;
+    transform: translate(-50%, -50%) scale(0.94);
+  }
+  to {
+    opacity: 1;
+    transform: translate(-50%, -50%) scale(1);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  [style*="dropdownIn"] {
+    animation: none !important;
   }
 }

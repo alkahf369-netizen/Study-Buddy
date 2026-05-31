@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { auth } from "@/auth";
 import { decrypt } from "@/lib/encryption";
+import { getPublicApiKey } from "@/lib/admin";
 
 function getModelDescription(id: string) {
   const lower = id.toLowerCase();
@@ -336,11 +337,20 @@ export async function GET() {
 
     if (session?.user?.id) {
       const activeKey = await prisma.apiKey.findFirst({
-        where: { userId: session.user.id, isActive: true },
+        where: { userId: session.user.id, isActive: true, isPublic: false },
         select: { key: true, endpoint: true }
       });
       if (activeKey?.key) apiKey = decrypt(activeKey.key);
       if (activeKey?.endpoint) apiEndpoint = activeKey.endpoint;
+    }
+
+    // Fall back to public API key
+    if (!apiKey || apiKey.includes('your_nano_gpt_api_key_here')) {
+      const publicKey = await getPublicApiKey();
+      if (publicKey) {
+        apiKey = decrypt(publicKey.key);
+        if (publicKey.endpoint) apiEndpoint = publicKey.endpoint;
+      }
     }
 
     if (!apiKey) {

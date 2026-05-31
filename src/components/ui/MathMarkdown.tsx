@@ -13,17 +13,28 @@ type MathMarkdownProps = {
   className?: string;
 };
 
+// Custom image renderer (clean, no overlay buttons — download is in action bar)
+function ImageWithDownload({ src, alt, ...props }: React.ImgHTMLAttributes<HTMLImageElement>) {
+  if (!src) return null;
+  return (
+    <img
+      src={src}
+      alt={alt || "Generated Image"}
+      className="max-w-full rounded-xl border border-zinc-200 shadow-sm"
+      style={{ maxHeight: "400px", objectFit: "contain", display: "block" }}
+      {...props}
+    />
+  );
+}
+
 export function MathMarkdown({ content, inline = false, className }: MathMarkdownProps) {
   if (inline) {
-    // Lightweight inline mode: renders without wrapping <p> tags
-    // Used for MCQ options and short text snippets
     return (
       <span className={className}>
         <ReactMarkdown
           remarkPlugins={[remarkGfm, remarkMath]}
           rehypePlugins={[rehypeKatex]}
           components={{
-            // Unwrap paragraphs for inline usage
             p: ({ children }) => <span>{children}</span>,
           }}
         >
@@ -44,6 +55,7 @@ export function MathMarkdown({ content, inline = false, className }: MathMarkdow
               <table {...props}>{children}</table>
             </div>
           ),
+          img: (props) => <ImageWithDownload {...props} />,
         }}
       >
         {content}

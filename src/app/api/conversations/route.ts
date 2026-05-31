@@ -70,28 +70,16 @@ export async function DELETE(req: Request) {
     }
 
     const { searchParams } = new URL(req.url);
-    const kind = searchParams.get('kind'); // 'chat', 'mcq', or null for all
+    const kind = searchParams.get('kind');
 
     const where: any = { userId: session.user.id };
     if (kind) where.kind = kind;
 
-    // Delete messages first (foreign key), then conversations
-    const conversations = await prisma.conversation.findMany({
-      where,
-      select: { id: true },
-    });
-    const ids = conversations.map((c: any) => c.id);
+    // Messages cascade-delete via Prisma relation (onDelete: Cascade)
+    // So we only need to delete conversations
+    const result = await prisma.conversation.deleteMany({ where });
 
-    if (ids.length > 0) {
-      await prisma.message.deleteMany({
-        where: { conversationId: { in: ids } },
-      });
-      await prisma.conversation.deleteMany({
-        where: { id: { in: ids } },
-      });
-    }
-
-    return NextResponse.json({ deleted: ids.length });
+    return NextResponse.json({ deleted: result.count });
   } catch (error: any) {
     console.error("[conversations] DELETE error:", error);
     return NextResponse.json({ error: "Failed to delete conversations" }, { status: 500 });

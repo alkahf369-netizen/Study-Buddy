@@ -16,12 +16,29 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
     signIn: "/login",
   },
   callbacks: {
-    session: ({ session, user }) => ({
-      ...session,
-      user: {
-        ...session.user,
-        id: user.id,
-      },
-    }),
+    session: async ({ session, user }) => {
+      // Block banned users — fetch ban status from DB
+      const dbUser = await prisma.user.findUnique({
+        where: { id: user.id },
+        select: { isBanned: true, role: true },
+      });
+      return {
+        ...session,
+        user: {
+          ...session.user,
+          id: user.id,
+          isBanned: dbUser?.isBanned ?? false,
+          role: dbUser?.role ?? "user",
+        },
+      };
+    },
+  },
+  logger: {
+    error(error) {
+      console.error("[auth] ERROR:", error);
+    },
+    warn(code) {
+      console.warn("[auth] WARN:", code);
+    },
   },
 })

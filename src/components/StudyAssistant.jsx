@@ -6,6 +6,7 @@ import PageRangeSelector from "@/components/PageRangeSelector";
 import SetupForm from "@/components/test/SetupForm";
 import { MCQCardUI } from "@/components/quiz/MCQCardUI";
 import ExamModeView from "@/components/quiz/ExamModeView";
+import AnnouncementsBell from "@/components/AnnouncementsBell";
 import {
   Plus,
   Sparkles,
@@ -45,6 +46,7 @@ import {
   Paperclip,
   Image as ImageIcon,
   KeyRound,
+  Key,
   Eye,
   EyeOff,
   AlertTriangle,
@@ -59,6 +61,12 @@ import {
   Clock,
   Share2,
   LogIn,
+  Download,
+  TrendingUp,
+  Activity,
+  Flame,
+  Zap as ZapIcon,
+  PieChart,
 } from "lucide-react";
 
 /* Study Buddy Logo — uses the new brand image */
@@ -270,7 +278,7 @@ const ComplexityPicker = ({ value, onChange }) => {
       {open && mounted && createPortal(
         <>
           <div
-            className="fixed inset-0 z-[100] bg-black/20 backdrop-blur-sm sm:bg-transparent sm:backdrop-blur-0"
+            className="fixed inset-0 z-[100] bg-black/20 backdrop-blur-sm sm:bg-transparent sm:backdrop-blur-none"
             onClick={(e) => { e.stopPropagation(); setOpen(false); }}
           />
           <div
@@ -461,16 +469,95 @@ const fileToBase64 = (file) =>
     reader.readAsDataURL(file);
   });
 
-/** Convert an array of File objects → Gemini-style `inlineData` parts. */
+/**
+ * Compress an image file to JPEG using canvas.
+ * - Resizes to max 1920px on longest side
+ * - Converts to JPEG, iteratively reducing quality until ≤ 2MB
+ * Returns { base64, mimeType } where base64 has NO data: prefix.
+ */
+const compressImage = (file) =>
+  new Promise((resolve, reject) => {
+    // Skip non-image files
+    if (!file.type || !file.type.startsWith("image/")) {
+      fileToBase64(file).then(data => resolve({ base64: data, mimeType: file.type })).catch(reject);
+      return;
+    }
+
+    const img = new Image();
+    const url = URL.createObjectURL(file);
+
+    img.onload = () => {
+      URL.revokeObjectURL(url);
+
+      const MAX_DIM = 1920;
+      const MAX_BYTES = 2 * 1024 * 1024; // 2 MB cap on output
+      let { width, height } = img;
+
+      // Scale down if needed
+      if (width > MAX_DIM || height > MAX_DIM) {
+        const ratio = Math.min(MAX_DIM / width, MAX_DIM / height);
+        width = Math.round(width * ratio);
+        height = Math.round(height * ratio);
+      }
+
+      const canvas = document.createElement("canvas");
+      canvas.width = width;
+      canvas.height = height;
+      const ctx = canvas.getContext("2d");
+      ctx.drawImage(img, 0, 0, width, height);
+
+      // Iteratively reduce quality until output ≤ 2 MB
+      let quality = 0.80;
+      let dataUrl = canvas.toDataURL("image/jpeg", quality);
+
+      while (dataUrl.length > (MAX_BYTES * 4) / 3 + 100 && quality > 0.2) {
+        quality -= 0.1;
+        dataUrl = canvas.toDataURL("image/jpeg", quality);
+      }
+
+      // If still too large, scale down resolution further
+      if (dataUrl.length > (MAX_BYTES * 4) / 3 + 100) {
+        const scale = 0.6;
+        canvas.width = Math.round(width * scale);
+        canvas.height = Math.round(height * scale);
+        ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+        dataUrl = canvas.toDataURL("image/jpeg", 0.5);
+      }
+
+      // Extract raw base64
+      const commaIdx = dataUrl.indexOf(",");
+      const base64 = commaIdx >= 0 ? dataUrl.slice(commaIdx + 1) : dataUrl;
+
+      resolve({ base64, mimeType: "image/jpeg" });
+    };
+
+    img.onerror = () => {
+      URL.revokeObjectURL(url);
+      // Fallback: return original file as base64
+      fileToBase64(file).then(data => resolve({ base64: data, mimeType: file.type })).catch(reject);
+    };
+
+    img.src = url;
+  });
+
+/** Convert an array of File objects → Gemini-style `inlineData` parts (with image compression). */
 const filesToInlineParts = async (files) => {
   if (!files || files.length === 0) return [];
   const parts = await Promise.all(
-    files.map(async (f) => ({
-      inlineData: {
-        data: await fileToBase64(f),
-        mimeType: f.type || "application/octet-stream",
-      },
-    }))
+    files.map(async (f) => {
+      if (f.type && f.type.startsWith("image/")) {
+        // Compress images to JPEG
+        const { base64, mimeType } = await compressImage(f);
+        return { inlineData: { data: base64, mimeType } };
+      }
+      // Non-image files (PDF etc) — keep as-is
+      return {
+        inlineData: {
+          data: await fileToBase64(f),
+          mimeType: f.type || "application/octet-stream",
+        },
+      };
+    })
   );
   return parts;
 };
@@ -683,13 +770,52 @@ const DEFAULT_MODELS = [
   },
 ];
 
+// Image generation models available on NanoGPT (text-to-image only)
+const IMAGE_MODELS = [
+  { id: "gpt-image-2", name: "GPT Image 2", provider: "OpenAI", description: "High-fidelity text-to-image", resolutions: ["1024x1024", "2048x2048"], icon: "/icons/chatgpt.png" },
+  { id: "nano-banana-pro-ultra", name: "Nano Banana Pro Ultra", provider: "Google", description: "Ultra quality, up to 8K", resolutions: ["4096x4096", "8192x8192"], icon: "/icons/gemini.png" },
+  { id: "nano-banana-pro", name: "Nano Banana Pro", provider: "Google", description: "Pro quality, up to 4K", resolutions: ["1024x1024", "2048x2048", "4096x4096"], icon: "/icons/gemini.png" },
+  { id: "nano-banana-2", name: "Nano Banana 2", provider: "Google", description: "Fast generation, up to 4K", resolutions: ["1024x1024", "2048x2048", "4096x4096"], icon: "/icons/gemini.png" },
+];
+
+// Resolution labels mapped to base pixel size
+const RESOLUTION_OPTIONS = [
+  { label: "1K", base: 1024 },
+  { label: "2K", base: 2048 },
+  { label: "4K", base: 4096 },
+  { label: "8K", base: 8192 },
+];
+
+// Aspect ratio options with multipliers
+const ASPECT_RATIOS = [
+  { label: "1:1", w: 1, h: 1 },
+  { label: "16:9", w: 16, h: 9 },
+  { label: "4:3", w: 4, h: 3 },
+];
+
+/**
+ * Compute the pixel size string from resolution base + aspect ratio.
+ * e.g. base=1024, ratio={w:16,h:9} → "1024x576"
+ */
+function computeImageSize(base, ratio) {
+  if (ratio.w === ratio.h) return `${base}x${base}`;
+  // Keep the longest side at `base`, scale the other
+  const aspect = ratio.w / ratio.h;
+  if (aspect > 1) {
+    // Landscape
+    return `${base}x${Math.round(base / aspect)}`;
+  }
+  // Portrait (shouldn't happen with our ratios but just in case)
+  return `${Math.round(base * aspect)}x${base}`;
+}
+
 function cn(...classes) {
   return classes.filter(Boolean).join(" ");
 }
 
 /* ---------------- Model Switcher ---------------- */
 /* ---------------- Mode Switcher (inline @chat / @quiz pill) ---------------- */
-const ModeSwitcher = ({ value, onChange }) => {
+const ModeSwitcher = ({ value, onChange, hideImage }) => {
   const [open, setOpen] = useState(false);
   const ref = useRef(null);
 
@@ -704,6 +830,7 @@ const ModeSwitcher = ({ value, onChange }) => {
   const options = [
     { id: "chat", label: "@chat", Icon: MessageCircle },
     { id: "mcq", label: "@quiz", Icon: ListChecks },
+    ...(!hideImage ? [{ id: "image", label: "@image", Icon: ImageIcon }] : []),
   ];
   const current = options.find((o) => o.id === value) || options[0];
 
@@ -742,6 +869,87 @@ const ModeSwitcher = ({ value, onChange }) => {
                 <opt.Icon className="h-3.5 w-3.5" />
                 <span>{opt.label}</span>
                 {active && <Check className="ml-auto h-3 w-3 text-black" />}
+              </button>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+};
+
+/* ---------------- Image Dropdown (resolution / aspect ratio / model picker) ---------------- */
+const ImageDropdown = ({ label, options, value, onChange, testId, icon, models }) => {
+  const [open, setOpen] = useState(false);
+  const ref = useRef(null);
+
+  useEffect(() => {
+    const handler = (e) => {
+      if (ref.current && !ref.current.contains(e.target)) setOpen(false);
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, []);
+
+  return (
+    <div className="relative" ref={ref}>
+      <button
+        data-testid={testId}
+        onClick={() => setOpen((v) => !v)}
+        className="inline-flex items-center gap-1.5 rounded-lg border border-zinc-200 bg-white px-2.5 py-1.5 text-[12.5px] font-medium text-zinc-700 shadow-sm transition hover:border-zinc-400 hover:bg-zinc-50"
+      >
+        {icon && (
+          <img src={icon} alt="" className="h-4 w-4 rounded-sm object-contain" />
+        )}
+        <span className="max-w-[120px] truncate">{value}</span>
+        <ChevronDown
+          className={cn(
+            "h-3 w-3 text-zinc-400 transition-transform duration-200",
+            open && "rotate-180"
+          )}
+        />
+      </button>
+      {open && (
+        <div
+          className="absolute top-full left-0 z-50 mt-1.5 min-w-[200px] origin-top overflow-hidden rounded-xl border border-zinc-200 bg-white/95 p-1 shadow-xl backdrop-blur-sm"
+          style={{
+            animation: "dropdownIn 180ms cubic-bezier(0.22, 0.85, 0.3, 1) both",
+            transformOrigin: "top left",
+          }}
+        >
+          {options.map((opt) => {
+            const active = value === opt;
+            // Try to find model info for richer display
+            const modelInfo = models ? models.find((m) => m.name === opt) : null;
+            return (
+              <button
+                key={opt}
+                onClick={() => { onChange(opt); setOpen(false); }}
+                className={cn(
+                  "flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-left transition-all",
+                  active
+                    ? "bg-zinc-900 text-white shadow-sm"
+                    : "text-zinc-700 hover:bg-zinc-100"
+                )}
+              >
+                {modelInfo?.icon && (
+                  <img
+                    src={modelInfo.icon}
+                    alt=""
+                    className={cn("h-5 w-5 rounded object-contain", active && "brightness-0 invert")}
+                  />
+                )}
+                <div className="flex-1 min-w-0">
+                  <div className={cn("text-[12.5px] font-semibold truncate", active ? "text-white" : "text-zinc-800")}>
+                    {opt}
+                  </div>
+                  {modelInfo?.description && (
+                    <div className={cn("text-[10.5px] truncate", active ? "text-zinc-300" : "text-zinc-400")}>
+                      {modelInfo.description}
+                    </div>
+                  )}
+                </div>
+                {active && <Check className="h-3.5 w-3.5 shrink-0 text-white" />}
               </button>
             );
           })}
@@ -883,7 +1091,7 @@ const ModelSwitcher = ({ models, value, onChange }) => {
       {open && mounted && createPortal(
         <>
           <div
-            className="fixed inset-0 z-[100] bg-black/20 backdrop-blur-sm sm:bg-transparent sm:backdrop-blur-0"
+            className="fixed inset-0 z-[100] bg-black/20 backdrop-blur-sm sm:bg-transparent sm:backdrop-blur-none"
             onClick={(e) => { e.stopPropagation(); setOpen(false); }}
           />
           <div
@@ -898,12 +1106,15 @@ const ModelSwitcher = ({ models, value, onChange }) => {
                     transform: "translate(-50%, -50%)",
                     width: "min(92vw, 320px)",
                     height: "min(70vh, 380px)",
+                    animation: "dropdownInCenter 220ms cubic-bezier(0.22, 0.85, 0.3, 1) both",
                   }
                 : {
                     left: triggerRect.left,
-                    top: triggerRect.top - 8 - 280,
+                    top: triggerRect.bottom + 8,
                     width: 380,
                     height: 280,
+                    animation: "dropdownIn 200ms cubic-bezier(0.22, 0.85, 0.3, 1) both",
+                    transformOrigin: "top left",
                   }
             }
           >
@@ -1076,6 +1287,11 @@ const SettingsModal = ({
   const [keyError, setKeyError] = useState("");
   const [showApiKey, setShowApiKey] = useState(false);
 
+  // Active API source state (inbuilt vs personal)
+  const [activeSource, setActiveSource] = useState("inbuilt");
+  const [hasPublicKey, setHasPublicKey] = useState(false);
+  const [switchingSource, setSwitchingSource] = useState(false);
+
   // Re-sync local draft whenever the modal is opened
   useEffect(() => {
     if (open) {
@@ -1095,6 +1311,15 @@ const SettingsModal = ({
       setKeyError("");
       setShowApiKey(false);
       setIsSavingKey(false);
+
+      // Fetch active API source
+      fetch("/api/user/active-source")
+        .then(r => r.json())
+        .then(data => {
+          setHasPublicKey(data.hasPublicKey);
+          setActiveSource(data.activeSource || "inbuilt");
+        })
+        .catch(() => {});
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open]);
@@ -1161,130 +1386,264 @@ const SettingsModal = ({
     >
       {/* Backdrop */}
       <div
-        className="absolute inset-0 bg-black/30 backdrop-blur-sm"
+        className="absolute inset-0 bg-zinc-950/40 backdrop-blur-sm"
         onClick={onClose}
       />
 
       {/* Panel */}
-      <div className="relative z-10 flex max-h-[92vh] w-full max-w-[760px] flex-col overflow-hidden rounded-2xl border border-zinc-200 bg-white shadow-[0_30px_80px_rgba(17,24,39,0.18)] sm:flex-row">
+      <div className="relative z-10 flex h-[640px] max-h-[92vh] w-full max-w-[860px] flex-col overflow-hidden rounded-xl border border-zinc-200 bg-white shadow-[0_24px_60px_-12px_rgba(0,0,0,0.18)] sm:flex-row">
         {/* Tabs — horizontal scroll on mobile, vertical stack on desktop */}
-        <div className="flex shrink-0 gap-1 overflow-x-auto border-b border-zinc-200 bg-zinc-50/60 p-2 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden sm:w-[180px] sm:flex-col sm:gap-0 sm:overflow-visible sm:border-b-0 sm:border-r sm:p-3">
-          <div className="hidden px-2 pt-1 pb-3 text-[11px] font-semibold uppercase tracking-wider text-zinc-500 sm:block">
-            Settings
+        <div className="relative shrink-0 sm:w-[200px]">
+          {/* Right fade gradient on mobile (indicates scrollable tabs) */}
+          <div className="pointer-events-none absolute inset-y-0 right-0 z-10 w-8 bg-gradient-to-l from-white to-transparent sm:hidden" />
+          <div className="flex overflow-x-auto border-b border-zinc-100 bg-white px-3 py-2 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden sm:flex-col sm:gap-px sm:overflow-visible sm:border-b-0 sm:border-r sm:bg-zinc-50/50 sm:p-3">
+            <div
+              className="hidden px-2.5 pt-1 pb-3 text-[10.5px] font-semibold uppercase tracking-[0.08em] text-zinc-400 sm:block"
+              style={{ fontFamily: "'Manrope', system-ui, sans-serif" }}
+            >
+              Settings
+            </div>
+            {SETTINGS_TABS.map((t) => {
+              const active = tab === t.id;
+              const Icon = t.Icon;
+              return (
+                <button
+                  key={t.id}
+                  data-testid={`settings-tab-${t.id}`}
+                  onClick={() => setTab(t.id)}
+                  title={t.label}
+                  className={cn(
+                    "relative flex shrink-0 items-center gap-1.5 whitespace-nowrap px-3 py-2 text-[13px] font-medium transition-colors",
+                    active
+                      ? "text-zinc-950 sm:bg-zinc-100"
+                      : "text-zinc-500 hover:text-zinc-900 sm:hover:bg-zinc-100",
+                    "sm:flex-none sm:justify-start sm:gap-2.5 sm:rounded-md sm:px-2.5 sm:text-[13px]"
+                  )}
+                >
+                  <Icon className={cn("h-[14px] w-[14px] shrink-0 sm:h-[15px] sm:w-[15px]", active ? "sm:text-zinc-700" : "text-zinc-400")} />
+                  {t.label}
+                  {/* Mobile-only active indicator (underline) */}
+                  {active && (
+                    <span className="absolute inset-x-3 -bottom-[1px] h-[2px] rounded-full bg-zinc-900 sm:hidden" />
+                  )}
+                </button>
+              );
+            })}
           </div>
-          {SETTINGS_TABS.map((t) => {
-            const active = tab === t.id;
-            const Icon = t.Icon;
-            return (
-              <button
-                key={t.id}
-                data-testid={`settings-tab-${t.id}`}
-                onClick={() => setTab(t.id)}
-                title={t.label}
-                className={cn(
-                  "flex shrink-0 items-center justify-center gap-1.5 whitespace-nowrap rounded-lg px-2.5 py-1.5 text-[12.5px] font-medium transition-colors sm:flex-none sm:justify-start sm:gap-2 sm:px-3 sm:py-2 sm:text-[13px]",
-                  active
-                    ? "bg-black text-white"
-                    : "text-zinc-700 hover:bg-zinc-100 hover:text-black"
-                )}
-              >
-                <Icon className="h-[14px] w-[14px] shrink-0 sm:h-[15px] sm:w-[15px]" />
-                {t.label}
-              </button>
-            );
-          })}
         </div>
 
         {/* Content */}
-        <div className="flex min-h-[360px] min-w-0 flex-1 flex-col sm:min-h-[420px]">
-          <div className="flex items-center justify-between border-b border-zinc-200 px-4 py-3 sm:px-6 sm:py-4">
-            <h2 className="text-[15px] font-semibold text-black">
+        <div className="flex min-w-0 flex-1 flex-col">
+          <div className="flex items-center justify-between border-b border-zinc-100 px-5 py-4 sm:px-7">
+            <h2
+              className="text-[18px] font-semibold tracking-tight text-zinc-950"
+              style={{ fontFamily: "'Manrope', system-ui, sans-serif", letterSpacing: "-0.02em" }}
+            >
               {SETTINGS_TABS.find((t) => t.id === tab)?.label}
             </h2>
             <button
               data-testid="settings-close"
               onClick={onClose}
-              className="flex h-8 w-8 items-center justify-center rounded-md text-zinc-500 hover:bg-zinc-100 hover:text-black"
+              className="flex h-7 w-7 items-center justify-center rounded-md text-zinc-400 transition-colors hover:bg-zinc-100 hover:text-zinc-900"
               aria-label="Close"
             >
-              <X className="h-[18px] w-[18px]" />
+              <X className="h-[16px] w-[16px]" />
             </button>
           </div>
 
-          <div className="flex-1 overflow-y-auto px-4 py-4 sm:px-6 sm:py-5">
+          <div className="flex-1 overflow-y-auto px-5 py-5 sm:px-7 sm:py-6">
             {tab === "profile" && (
-              <div className="space-y-5">
+              <div className="space-y-6">
                 {/* Google Account Card */}
                 {authUser && (
-                  <div className="rounded-xl border border-zinc-200 bg-zinc-50/50 p-4">
-                    <div className="mb-2 text-[11px] font-semibold uppercase tracking-wider text-zinc-500">
-                      Signed in with Google
-                    </div>
-                    <div className="flex items-center gap-3">
-                      {authUser.image ? (
-                        <img
-                          src={authUser.image}
-                          alt=""
-                          className="h-12 w-12 rounded-full border-2 border-white shadow"
-                          referrerPolicy="no-referrer"
-                        />
-                      ) : (
-                        <div className="flex h-12 w-12 items-center justify-center rounded-full bg-black text-lg font-bold text-white">
-                          {(authUser.name || "?").charAt(0).toUpperCase()}
-                        </div>
-                      )}
-                      <div className="min-w-0">
-                        <div className="truncate text-[15px] font-semibold text-black">
-                          {authUser.name || "User"}
-                        </div>
-                        <div className="truncate text-[12.5px] text-zinc-500">
-                          {authUser.email || ""}
-                        </div>
+                  <div className="flex items-center gap-4 rounded-lg border border-zinc-200 bg-white p-4">
+                    {authUser.image ? (
+                      <img
+                        src={authUser.image}
+                        alt=""
+                        className="h-14 w-14 rounded-full ring-1 ring-zinc-200"
+                        referrerPolicy="no-referrer"
+                      />
+                    ) : (
+                      <div className="flex h-14 w-14 items-center justify-center rounded-full bg-zinc-900 text-[18px] font-semibold text-white">
+                        {(authUser.name || "?").charAt(0).toUpperCase()}
+                      </div>
+                    )}
+                    <div className="min-w-0 flex-1">
+                      <div className="truncate text-[14px] font-semibold text-zinc-950">
+                        {authUser.name || "User"}
+                      </div>
+                      <div className="truncate text-[12.5px] text-zinc-500">
+                        {authUser.email || ""}
                       </div>
                     </div>
+                    <span className="hidden shrink-0 rounded-full border border-zinc-200 bg-zinc-50 px-2 py-0.5 text-[10.5px] font-medium text-zinc-600 sm:inline-flex">
+                      Google
+                    </span>
                   </div>
                 )}
-                <div>
-                  <label className="mb-1.5 block text-[12px] font-semibold text-zinc-700">
-                    Display name
-                  </label>
+
+                {/* Display name */}
+                <div className="border-t border-zinc-100 pt-5">
+                  <div className="flex items-baseline justify-between gap-4">
+                    <div className="min-w-0">
+                      <label className="block text-[13px] font-semibold text-zinc-900">
+                        Display name
+                      </label>
+                      <p className="mt-0.5 text-[12px] text-zinc-500">
+                        Shown in the sidebar and used when greeting you.
+                      </p>
+                    </div>
+                  </div>
                   <input
                     data-testid="settings-displayName"
                     type="text"
                     value={draft.displayName}
                     maxLength={40}
                     onChange={(e) => update({ displayName: e.target.value })}
-                    className="w-full rounded-lg border border-zinc-200 bg-white px-3 py-2 text-[14px] text-black outline-none transition focus:border-zinc-500"
+                    className="mt-3 w-full rounded-md border border-zinc-200 bg-white px-3 py-2 text-[14px] text-zinc-900 outline-none transition focus:border-zinc-400 focus:ring-2 focus:ring-zinc-100"
                     placeholder={authUser?.name || "Your name"}
                   />
-                  <p className="mt-1 text-[11.5px] text-zinc-500">
-                    Shown in the sidebar and used when greeting you.
-                  </p>
                 </div>
-                <div>
-                  <label className="mb-1.5 block text-[12px] font-semibold text-zinc-700">
-                    Email
-                  </label>
+
+                {/* Email */}
+                <div className="border-t border-zinc-100 pt-5">
+                  <div className="flex items-baseline justify-between gap-4">
+                    <div className="min-w-0">
+                      <label className="block text-[13px] font-semibold text-zinc-900">
+                        Email
+                      </label>
+                      <p className="mt-0.5 text-[12px] text-zinc-500">
+                        Synced from your Google account. Cannot be changed.
+                      </p>
+                    </div>
+                  </div>
                   <input
                     data-testid="settings-email"
                     type="email"
                     value={draft.email || authUser?.email || ""}
                     readOnly
-                    className="w-full rounded-lg border border-zinc-200 bg-zinc-100 px-3 py-2 text-[14px] text-zinc-600 outline-none cursor-not-allowed"
+                    className="mt-3 w-full cursor-not-allowed rounded-md border border-zinc-200 bg-zinc-50 px-3 py-2 text-[14px] text-zinc-500 outline-none"
                   />
-                  <p className="mt-1 text-[11.5px] text-zinc-400">
-                    Synced from your Google account.
-                  </p>
                 </div>
               </div>
             )}
 
             {tab === "apikey" && (
               <div className="space-y-6">
+                {/* Active API Source Switcher */}
                 <div>
+                  <h3 className="mb-2 text-[14px] font-semibold text-black">Active API Source</h3>
+                  <p className="mb-4 text-[12px] text-zinc-600">
+                    Choose which API key to use for AI requests.
+                  </p>
+
+                  <div className="space-y-2">
+                    {/* Inbuilt API option */}
+                    <div
+                      className={cn(
+                        "flex items-center justify-between rounded-lg border p-3 transition cursor-pointer",
+                        activeSource === "inbuilt"
+                          ? "border-black bg-zinc-50"
+                          : "border-zinc-200 bg-white hover:border-zinc-300"
+                      )}
+                      onClick={async () => {
+                        if (activeSource === "inbuilt" || switchingSource) return;
+                        setSwitchingSource(true);
+                        try {
+                          await fetch("/api/user/active-source", {
+                            method: "PUT",
+                            headers: { "Content-Type": "application/json" },
+                            body: JSON.stringify({ source: "inbuilt" }),
+                          });
+                          setActiveSource("inbuilt");
+                        } catch {}
+                        setSwitchingSource(false);
+                      }}
+                    >
+                      <div className="flex items-center gap-3">
+                        <div className={cn(
+                          "flex h-8 w-8 items-center justify-center rounded-lg",
+                          activeSource === "inbuilt" ? "bg-black text-white" : "bg-zinc-100 text-zinc-500"
+                        )}>
+                          <Zap className="h-4 w-4" />
+                        </div>
+                        <div>
+                          <div className="text-[13px] font-semibold text-black">Inbuilt API</div>
+                          <div className="text-[11px] text-zinc-500">Free shared API provided by Study Buddy</div>
+                        </div>
+                      </div>
+                      <div className={cn(
+                        "flex h-5 w-5 items-center justify-center rounded-full border-2 transition",
+                        activeSource === "inbuilt" ? "border-black bg-black" : "border-zinc-300"
+                      )}>
+                        {activeSource === "inbuilt" && (
+                          <div className="h-2 w-2 rounded-full bg-white" />
+                        )}
+                      </div>
+                    </div>
+
+                    {/* Personal API option */}
+                    {apiKeys && apiKeys.length > 0 && (
+                      <div
+                        className={cn(
+                          "flex items-center justify-between rounded-lg border p-3 transition cursor-pointer",
+                          activeSource === "personal"
+                            ? "border-black bg-zinc-50"
+                            : "border-zinc-200 bg-white hover:border-zinc-300"
+                        )}
+                        onClick={async () => {
+                          if (activeSource === "personal" || switchingSource) return;
+                          setSwitchingSource(true);
+                          try {
+                            await fetch("/api/user/active-source", {
+                              method: "PUT",
+                              headers: { "Content-Type": "application/json" },
+                              body: JSON.stringify({ source: "personal" }),
+                            });
+                            setActiveSource("personal");
+                          } catch {}
+                          setSwitchingSource(false);
+                        }}
+                      >
+                        <div className="flex items-center gap-3">
+                          <div className={cn(
+                            "flex h-8 w-8 items-center justify-center rounded-lg",
+                            activeSource === "personal" ? "bg-black text-white" : "bg-zinc-100 text-zinc-500"
+                          )}>
+                            <Key className="h-4 w-4" />
+                          </div>
+                          <div>
+                            <div className="text-[13px] font-semibold text-black">Personal API Key</div>
+                            <div className="text-[11px] text-zinc-500">
+                              {apiKeys.find(k => k.isActive)?.name || apiKeys[0]?.name || "Your own key"}
+                            </div>
+                          </div>
+                        </div>
+                        <div className={cn(
+                          "flex h-5 w-5 items-center justify-center rounded-full border-2 transition",
+                          activeSource === "personal" ? "border-black bg-black" : "border-zinc-300"
+                        )}>
+                          {activeSource === "personal" && (
+                            <div className="h-2 w-2 rounded-full bg-white" />
+                          )}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+
+                  {switchingSource && (
+                    <div className="mt-2 flex items-center gap-2 text-[11px] text-zinc-500">
+                      <Loader2 className="h-3 w-3 animate-spin" /> Switching...
+                    </div>
+                  )}
+                </div>
+
+                {/* Personal Keys Management */}
+                <div className="border-t border-zinc-200 pt-6">
                   <h3 className="mb-2 text-[14px] font-semibold text-black">Your API Keys</h3>
                   <p className="mb-4 text-[12px] text-zinc-600">
-                    Manage your API keys below. Only one key can be active at a time.
+                    Manage your personal API keys below. Only one key can be active at a time.
                   </p>
 
                   <div className="space-y-3">
@@ -1310,7 +1669,10 @@ const SettingsModal = ({
                               role="switch"
                               aria-checked={k.isActive}
                               onClick={() => {
-                                if (!k.isActive) onToggleActiveKey(k.id);
+                                if (!k.isActive) {
+                                  onToggleActiveKey(k.id);
+                                  setActiveSource("personal");
+                                }
                               }}
                               className={cn(
                                 "relative h-5 w-9 shrink-0 rounded-full border transition-colors",
@@ -1338,7 +1700,7 @@ const SettingsModal = ({
                       ))
                     ) : (
                       <div className="rounded-lg border border-dashed border-zinc-300 p-6 text-center text-[13px] text-zinc-500">
-                        No API keys saved. Using application defaults.
+                        No personal API keys added. Using Inbuilt API.
                       </div>
                     )}
                   </div>
@@ -1413,103 +1775,426 @@ const SettingsModal = ({
               const totalTokens = usage.totalInput + usage.totalOutput;
               const inputPct = totalTokens > 0 ? (usage.totalInput / totalTokens) * 100 : 0;
               const outputPct = totalTokens > 0 ? (usage.totalOutput / totalTokens) * 100 : 0;
-              
+              const history = usage.history || [];
+
+              // Model breakdown from history
+              const modelBreakdown = {};
+              history.forEach((entry) => {
+                const model = entry.model || "Unknown";
+                if (!modelBreakdown[model]) modelBreakdown[model] = { input: 0, output: 0, count: 0 };
+                modelBreakdown[model].input += entry.input || 0;
+                modelBreakdown[model].output += entry.output || 0;
+                modelBreakdown[model].count += 1;
+              });
+              const modelEntries = Object.entries(modelBreakdown).sort((a, b) => (b[1].input + b[1].output) - (a[1].input + a[1].output));
+
+              // Daily usage from history (last 14 days)
+              const dailyUsage = {};
+              const dailyDates = [];
+              const now = Date.now();
+              for (let i = 13; i >= 0; i--) {
+                const d = new Date(now - i * 86400000);
+                const key = d.toLocaleDateString([], { month: "numeric", day: "numeric" });
+                dailyUsage[key] = 0;
+                dailyDates.push({ key, date: d, weekday: d.toLocaleDateString([], { weekday: "narrow" }) });
+              }
+              history.forEach((entry) => {
+                const d = new Date(entry.time);
+                const key = d.toLocaleDateString([], { month: "numeric", day: "numeric" });
+                if (dailyUsage[key] !== undefined) {
+                  dailyUsage[key] += (entry.input || 0) + (entry.output || 0);
+                }
+              });
+              const dailyValues = Object.values(dailyUsage);
+              const maxDaily = Math.max(...dailyValues, 1);
+
+              // Today vs yesterday
+              const todayKey = new Date().toLocaleDateString([], { month: "numeric", day: "numeric" });
+              const todayTokens = dailyUsage[todayKey] || 0;
+              const yesterdayKey = new Date(now - 86400000).toLocaleDateString([], { month: "numeric", day: "numeric" });
+              const yesterdayTokens = dailyUsage[yesterdayKey] || 0;
+              const dayDelta = yesterdayTokens > 0 ? ((todayTokens - yesterdayTokens) / yesterdayTokens) * 100 : null;
+
+              // Streak
+              let streak = 0;
+              for (let i = dailyDates.length - 1; i >= 0; i--) {
+                if (dailyUsage[dailyDates[i].key] > 0) streak++;
+                else if (i < dailyDates.length - 1) break;
+              }
+
+              // Hour-of-day distribution
+              const hourBuckets = new Array(24).fill(0);
+              history.forEach((entry) => {
+                const h = new Date(entry.time).getHours();
+                hourBuckets[h] += (entry.input || 0) + (entry.output || 0);
+              });
+              const peakHour = hourBuckets.indexOf(Math.max(...hourBuckets));
+              const peakHourLabel = peakHour < 12 ? `${peakHour || 12}am` : peakHour === 12 ? "12pm" : `${peakHour - 12}pm`;
+
+              // Insights
+              const avgTokensPerReq = usage.totalRequests > 0 ? Math.round(totalTokens / usage.totalRequests) : 0;
+              const lastUsed = history.length > 0
+                ? new Date(history[0].time).toLocaleString([], { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })
+                : "Never";
+
               return (
-                <div className="space-y-5">
-                  {/* Total tokens stat */}
-                  <div className="rounded-xl border border-zinc-200 bg-zinc-50/50 p-4">
-                    <div className="mb-3 flex items-center justify-between">
-                      <div className="text-[11px] font-semibold uppercase tracking-wider text-zinc-500">
-                        Total Tokens Used
+                <div className="space-y-6">
+                  {/* Hero — Total tokens, prominent */}
+                  <div className="rounded-2xl border border-zinc-200 bg-white p-6">
+                    <div className="flex items-start justify-between">
+                      <div className="min-w-0 flex-1">
+                        <div className="text-[12px] font-medium uppercase tracking-wider text-zinc-500">
+                          Total tokens
+                        </div>
+                        <div className="mt-2 flex items-baseline gap-3">
+                          <span className="text-[40px] font-bold tracking-tight leading-none text-black tabular-nums">
+                            {formatTokenCount(totalTokens)}
+                          </span>
+                          {dayDelta !== null && (
+                            <span
+                              className={cn(
+                                "inline-flex items-baseline gap-0.5 text-[13px] font-semibold tabular-nums",
+                                dayDelta >= 0 ? "text-black" : "text-zinc-500"
+                              )}
+                              title="Change vs. yesterday"
+                            >
+                              {dayDelta >= 0 ? "↑" : "↓"} {Math.abs(Math.round(dayDelta))}%
+                              <span className="ml-1 text-[11px] font-normal text-zinc-400">vs yesterday</span>
+                            </span>
+                          )}
+                        </div>
+                        <div className="mt-3 text-[13px] text-zinc-500">
+                          <span className="font-medium text-black tabular-nums">{usage.totalRequests}</span> requests
+                          <span className="mx-2 text-zinc-300">·</span>
+                          Last activity {lastUsed}
+                        </div>
                       </div>
                       <button
                         onClick={() => {
                           if (window.confirm("Reset all token usage data?")) {
                             resetTokenUsage();
-                            setDraft({ ...draft }); // Force re-render
+                            setDraft({ ...draft });
                           }
                         }}
-                        className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-[11px] font-medium text-zinc-500 transition hover:bg-zinc-200 hover:text-zinc-700"
+                        className="inline-flex items-center gap-1.5 rounded-lg border border-zinc-200 px-2.5 py-1.5 text-[12px] font-medium text-zinc-600 transition hover:border-zinc-400 hover:bg-zinc-50 hover:text-black"
+                        title="Reset usage data"
                       >
                         <RotateCcw className="h-3 w-3" />
                         Reset
                       </button>
                     </div>
-                    <div className="text-[32px] font-bold tracking-tight text-black">
-                      {formatTokenCount(totalTokens)}
+                  </div>
+
+                  {/* Key metrics row */}
+                  <div className="grid grid-cols-3 gap-3">
+                    <div className="rounded-xl border border-zinc-200 bg-white p-4">
+                      <div className="text-[11px] font-medium uppercase tracking-wider text-zinc-500">Today</div>
+                      <div className="mt-2 text-[24px] font-bold tracking-tight text-black tabular-nums">
+                        {formatTokenCount(todayTokens)}
+                      </div>
+                      <div className="mt-0.5 text-[12px] text-zinc-500">tokens used</div>
                     </div>
-                    <div className="mt-1 text-[12px] text-zinc-500">
-                      across {usage.totalRequests} request{usage.totalRequests !== 1 ? "s" : ""}
+                    <div className="rounded-xl border border-zinc-200 bg-white p-4">
+                      <div className="text-[11px] font-medium uppercase tracking-wider text-zinc-500">Streak</div>
+                      <div className="mt-2 flex items-baseline gap-1.5">
+                        <span className="text-[24px] font-bold tracking-tight text-black tabular-nums">{streak}</span>
+                        <span className="text-[13px] font-medium text-zinc-500">day{streak !== 1 ? "s" : ""}</span>
+                      </div>
+                      <div className="mt-0.5 text-[12px] text-zinc-500">consecutive</div>
+                    </div>
+                    <div className="rounded-xl border border-zinc-200 bg-white p-4">
+                      <div className="text-[11px] font-medium uppercase tracking-wider text-zinc-500">Peak hour</div>
+                      <div className="mt-2 text-[24px] font-bold tracking-tight text-black tabular-nums">
+                        {history.length > 0 ? peakHourLabel : "—"}
+                      </div>
+                      <div className="mt-0.5 text-[12px] text-zinc-500">most active</div>
                     </div>
                   </div>
 
-                  {/* Input / Output breakdown */}
-                  <div className="space-y-3">
-                    <div>
-                      <div className="mb-1.5 flex items-center justify-between">
-                        <span className="text-[12px] font-semibold text-zinc-700">Input Tokens</span>
-                        <span className="text-[12px] font-bold text-black">{formatTokenCount(usage.totalInput)}</span>
-                      </div>
-                      <div className="h-2 w-full overflow-hidden rounded-full bg-zinc-200">
-                        <div
-                          className="h-full rounded-full bg-black transition-all duration-500"
-                          style={{ width: `${Math.min(inputPct, 100)}%` }}
-                        />
-                      </div>
+                  {/* Section: Breakdown */}
+                  <div>
+                    <div className="mb-3 text-[11px] font-semibold uppercase tracking-wider text-zinc-500">
+                      Token breakdown
                     </div>
+                    <div className="rounded-xl border border-zinc-200 bg-white p-5">
+                      <div className="grid grid-cols-[140px_1fr] gap-6 items-center">
+                        {/* Donut chart */}
+                        <div className="relative flex items-center justify-center">
+                          <svg width="140" height="140" viewBox="0 0 140 140" className="-rotate-90">
+                            <circle cx="70" cy="70" r="56" fill="none" stroke="#e4e4e7" strokeWidth="20" />
+                            <circle
+                              cx="70" cy="70" r="56"
+                              fill="none"
+                              stroke="#000"
+                              strokeWidth="20"
+                              strokeDasharray={`${(inputPct / 100) * (2 * Math.PI * 56)} ${2 * Math.PI * 56}`}
+                              strokeLinecap="butt"
+                              className="transition-all duration-700 ease-out"
+                            />
+                          </svg>
+                          <div className="absolute inset-0 flex flex-col items-center justify-center">
+                            <span className="text-[26px] font-bold text-black tabular-nums leading-none">
+                              {Math.round(inputPct)}%
+                            </span>
+                            <span className="mt-1 text-[10px] font-medium uppercase tracking-wider text-zinc-500">Input</span>
+                          </div>
+                        </div>
 
-                    <div>
-                      <div className="mb-1.5 flex items-center justify-between">
-                        <span className="text-[12px] font-semibold text-zinc-700">Output Tokens</span>
-                        <span className="text-[12px] font-bold text-black">{formatTokenCount(usage.totalOutput)}</span>
-                      </div>
-                      <div className="h-2 w-full overflow-hidden rounded-full bg-zinc-200">
-                        <div
-                          className="h-full rounded-full bg-zinc-500 transition-all duration-500"
-                          style={{ width: `${Math.min(outputPct, 100)}%` }}
-                        />
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* Avg per request */}
-                  <div className="grid grid-cols-2 gap-3">
-                    <div className="rounded-lg border border-zinc-200 bg-white p-3">
-                      <div className="text-[10px] font-semibold uppercase tracking-wider text-zinc-400">Avg Input / Req</div>
-                      <div className="mt-1 text-[18px] font-bold text-black">
-                        {usage.totalRequests > 0 ? formatTokenCount(Math.round(usage.totalInput / usage.totalRequests)) : "—"}
-                      </div>
-                    </div>
-                    <div className="rounded-lg border border-zinc-200 bg-white p-3">
-                      <div className="text-[10px] font-semibold uppercase tracking-wider text-zinc-400">Avg Output / Req</div>
-                      <div className="mt-1 text-[18px] font-bold text-black">
-                        {usage.totalRequests > 0 ? formatTokenCount(Math.round(usage.totalOutput / usage.totalRequests)) : "—"}
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* Recent activity */}
-                  {usage.history && usage.history.length > 0 && (
-                    <div>
-                      <div className="mb-2 text-[11px] font-semibold uppercase tracking-wider text-zinc-500">
-                        Recent Activity
-                      </div>
-                      <div className="max-h-[160px] space-y-1.5 overflow-y-auto rounded-lg border border-zinc-200 bg-white p-2 [scrollbar-width:thin]">
-                        {usage.history.slice(0, 15).map((entry, i) => (
-                          <div key={i} className="flex items-center justify-between rounded-md px-2 py-1.5 text-[12px] hover:bg-zinc-50">
-                            <div className="flex items-center gap-2 min-w-0">
-                              <div className="h-1.5 w-1.5 rounded-full bg-black shrink-0" />
-                              <span className="truncate font-medium text-zinc-700">{entry.model || "Unknown"}</span>
+                        {/* Legend rows */}
+                        <div className="space-y-4">
+                          <div>
+                            <div className="flex items-center justify-between">
+                              <div className="flex items-center gap-2">
+                                <div className="h-2.5 w-2.5 rounded-sm bg-black" />
+                                <span className="text-[13px] font-semibold text-black">Input tokens</span>
+                              </div>
+                              <span className="text-[15px] font-bold text-black tabular-nums">
+                                {formatTokenCount(usage.totalInput)}
+                              </span>
                             </div>
-                            <div className="flex items-center gap-3 shrink-0 text-zinc-500">
-                              <span>{entry.input}→{entry.output}</span>
-                              <span className="text-[10px] text-zinc-400">
-                                {new Date(entry.time).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+                            <div className="mt-1 flex items-center gap-2 text-[11.5px] text-zinc-500">
+                              <span className="tabular-nums">{Math.round(inputPct)}% of total</span>
+                              <span className="text-zinc-300">·</span>
+                              <span>
+                                avg <strong className="font-semibold text-zinc-700 tabular-nums">
+                                  {usage.totalRequests > 0 ? formatTokenCount(Math.round(usage.totalInput / usage.totalRequests)) : "0"}
+                                </strong> / req
                               </span>
                             </div>
                           </div>
-                        ))}
+
+                          <div className="h-px bg-zinc-100" />
+
+                          <div>
+                            <div className="flex items-center justify-between">
+                              <div className="flex items-center gap-2">
+                                <div className="h-2.5 w-2.5 rounded-sm bg-zinc-300 ring-1 ring-zinc-400" />
+                                <span className="text-[13px] font-semibold text-black">Output tokens</span>
+                              </div>
+                              <span className="text-[15px] font-bold text-black tabular-nums">
+                                {formatTokenCount(usage.totalOutput)}
+                              </span>
+                            </div>
+                            <div className="mt-1 flex items-center gap-2 text-[11.5px] text-zinc-500">
+                              <span className="tabular-nums">{Math.round(outputPct)}% of total</span>
+                              <span className="text-zinc-300">·</span>
+                              <span>
+                                avg <strong className="font-semibold text-zinc-700 tabular-nums">
+                                  {usage.totalRequests > 0 ? formatTokenCount(Math.round(usage.totalOutput / usage.totalRequests)) : "0"}
+                                </strong> / req
+                              </span>
+                            </div>
+                          </div>
+                        </div>
                       </div>
+                    </div>
+                  </div>
+
+                  {/* Section: Activity */}
+                  <div>
+                    <div className="mb-3 flex items-baseline justify-between">
+                      <span className="text-[11px] font-semibold uppercase tracking-wider text-zinc-500">
+                        Activity over time
+                      </span>
+                      <span className="text-[11px] tabular-nums text-zinc-400">
+                        14 days · peak {formatTokenCount(maxDaily)}
+                      </span>
+                    </div>
+
+                    {/* 14-day bar chart */}
+                    <div className="rounded-xl border border-zinc-200 bg-white p-5">
+                      <div className="flex items-end gap-1.5 h-[88px]">
+                        {dailyDates.map((d, i) => {
+                          const val = dailyValues[i];
+                          const height = maxDaily > 0 ? Math.max((val / maxDaily) * 100, 4) : 4;
+                          const isToday = i === dailyDates.length - 1;
+                          return (
+                            <div key={d.key} className="flex flex-1 flex-col items-center gap-2 group">
+                              <div className="relative w-full flex justify-center flex-1 items-end">
+                                <div className="absolute -top-9 hidden group-hover:flex flex-col items-center rounded-md bg-black px-2 py-1 whitespace-nowrap z-10">
+                                  <span className="text-[11px] font-bold text-white tabular-nums">{formatTokenCount(val)}</span>
+                                  <span className="text-[9px] text-zinc-400">{d.date.toLocaleDateString([], { month: "short", day: "numeric" })}</span>
+                                </div>
+                                <div
+                                  className={cn(
+                                    "w-full rounded-sm transition-all duration-300 cursor-pointer",
+                                    isToday
+                                      ? "bg-black"
+                                      : val > 0
+                                      ? "bg-zinc-300 group-hover:bg-black"
+                                      : "bg-zinc-100"
+                                  )}
+                                  style={{ height: `${height}%` }}
+                                />
+                              </div>
+                              <span className={cn(
+                                "text-[10px] font-medium tabular-nums",
+                                isToday ? "text-black" : "text-zinc-400"
+                              )}>
+                                {i % 2 === 0 ? d.weekday : ""}
+                                {i % 2 !== 0 && <span className="text-transparent">·</span>}
+                              </span>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+
+                    {/* Hour distribution */}
+                    {history.length > 0 && (
+                      <div className="mt-3 rounded-xl border border-zinc-200 bg-white p-5">
+                        <div className="mb-3 flex items-baseline justify-between">
+                          <span className="text-[12px] font-semibold text-black">Hour of day</span>
+                          <span className="text-[11px] text-zinc-500">
+                            Peak: <span className="font-semibold text-black">{peakHourLabel}</span>
+                          </span>
+                        </div>
+                        <div className="flex items-end gap-[3px] h-[44px]">
+                          {hourBuckets.map((v, h) => {
+                            const max = Math.max(...hourBuckets, 1);
+                            const heightPct = (v / max) * 100;
+                            const isPeak = h === peakHour && v > 0;
+                            return (
+                              <div
+                                key={h}
+                                className="flex flex-1 items-end group relative"
+                                title={`${h.toString().padStart(2, "0")}:00 — ${formatTokenCount(v)} tokens`}
+                              >
+                                <div
+                                  className={cn(
+                                    "w-full rounded-sm transition-colors",
+                                    v === 0 ? "bg-zinc-100" : isPeak ? "bg-black" : "bg-zinc-400 group-hover:bg-black"
+                                  )}
+                                  style={{ height: `${Math.max(heightPct, 6)}%` }}
+                                />
+                              </div>
+                            );
+                          })}
+                        </div>
+                        <div className="mt-2 flex justify-between text-[10px] tabular-nums text-zinc-400">
+                          <span>12 AM</span>
+                          <span>6 AM</span>
+                          <span>12 PM</span>
+                          <span>6 PM</span>
+                          <span>11 PM</span>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Section: By model */}
+                  {modelEntries.length > 0 && (
+                    <div>
+                      <div className="mb-3 flex items-baseline justify-between">
+                        <span className="text-[11px] font-semibold uppercase tracking-wider text-zinc-500">
+                          By model
+                        </span>
+                        <span className="text-[11px] text-zinc-400">
+                          {modelEntries.length} model{modelEntries.length !== 1 ? "s" : ""}
+                        </span>
+                      </div>
+                      <div className="overflow-hidden rounded-xl border border-zinc-200 bg-white">
+                        {modelEntries.slice(0, 6).map(([model, data], i) => {
+                          const modelTotal = data.input + data.output;
+                          const modelPct = totalTokens > 0 ? (modelTotal / totalTokens) * 100 : 0;
+                          const opacity = 1 - i * 0.12;
+                          const avgPerReq = data.count > 0 ? Math.round(modelTotal / data.count) : 0;
+                          return (
+                            <div
+                              key={model}
+                              className={cn(
+                                "group px-4 py-3 transition-colors hover:bg-zinc-50",
+                                i > 0 && "border-t border-zinc-100"
+                              )}
+                            >
+                              <div className="flex items-center justify-between gap-3">
+                                <div className="flex min-w-0 items-center gap-2.5">
+                                  <div
+                                    className="h-2.5 w-2.5 shrink-0 rounded-sm bg-black"
+                                    style={{ opacity: Math.max(opacity, 0.3) }}
+                                  />
+                                  <span className="truncate text-[13px] font-semibold text-black">{model}</span>
+                                  <span className="shrink-0 rounded-md border border-zinc-200 bg-white px-1.5 py-0.5 text-[10px] font-semibold text-zinc-600 tabular-nums">
+                                    {data.count} calls
+                                  </span>
+                                </div>
+                                <div className="shrink-0 text-right">
+                                  <div className="text-[13px] font-bold text-black tabular-nums">{formatTokenCount(modelTotal)}</div>
+                                  <div className="text-[10.5px] text-zinc-500 tabular-nums">~{formatTokenCount(avgPerReq)} / req</div>
+                                </div>
+                              </div>
+                              <div className="mt-2 h-1 w-full overflow-hidden rounded-full bg-zinc-100">
+                                <div
+                                  className="h-full rounded-full bg-black transition-all duration-500 ease-out"
+                                  style={{ width: `${Math.min(modelPct, 100)}%`, opacity: Math.max(opacity, 0.4) }}
+                                />
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Section: Recent activity */}
+                  {history.length > 0 && (
+                    <div>
+                      <div className="mb-3 flex items-baseline justify-between">
+                        <span className="text-[11px] font-semibold uppercase tracking-wider text-zinc-500">
+                          Recent activity
+                        </span>
+                        <span className="text-[11px] tabular-nums text-zinc-400">
+                          {history.length} entries
+                        </span>
+                      </div>
+                      <div className="overflow-hidden rounded-xl border border-zinc-200 bg-white">
+                        <div className="max-h-[280px] overflow-y-auto [scrollbar-width:thin]">
+                          {history.slice(0, 25).map((entry, i) => {
+                            const entryTotal = (entry.input || 0) + (entry.output || 0);
+                            const isAboveAvg = entryTotal > avgTokensPerReq;
+                            return (
+                              <div
+                                key={i}
+                                className={cn(
+                                  "group relative flex items-center gap-3 px-4 py-2.5 text-[12.5px] transition-colors hover:bg-zinc-50",
+                                  i > 0 && "border-t border-zinc-100"
+                                )}
+                              >
+                                <div
+                                  className={cn(
+                                    "h-1.5 w-1.5 shrink-0 rounded-full",
+                                    isAboveAvg ? "bg-black" : "bg-zinc-400"
+                                  )}
+                                />
+                                <span className="min-w-0 flex-1 truncate font-medium text-black">
+                                  {entry.model || "Unknown"}
+                                </span>
+                                <div className="hidden shrink-0 items-center gap-2 text-[11px] tabular-nums text-zinc-500 group-hover:flex">
+                                  <span>↓ <span className="font-semibold text-black">{formatTokenCount(entry.input)}</span></span>
+                                  <span>↑ <span className="font-semibold text-zinc-700">{formatTokenCount(entry.output)}</span></span>
+                                </div>
+                                <span className="shrink-0 text-[12.5px] font-bold text-black tabular-nums group-hover:hidden">
+                                  {formatTokenCount(entryTotal)}
+                                </span>
+                                <span className="shrink-0 w-[52px] text-right text-[11px] tabular-nums text-zinc-400">
+                                  {new Date(entry.time).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+                                </span>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Empty state */}
+                  {history.length === 0 && totalTokens === 0 && (
+                    <div className="flex flex-col items-center justify-center rounded-xl border border-dashed border-zinc-300 bg-white py-12 text-center">
+                      <div className="mb-3 flex h-12 w-12 items-center justify-center rounded-full bg-zinc-100">
+                        <Activity className="h-5 w-5 text-zinc-500" />
+                      </div>
+                      <p className="text-[14px] font-semibold text-black">No usage data yet</p>
+                      <p className="mt-1 text-[12px] text-zinc-500">Start chatting to see your token usage here</p>
                     </div>
                   )}
                 </div>
@@ -1664,19 +2349,20 @@ const SettingsModal = ({
             )}
           </div>
 
-          <div className="flex items-center justify-between gap-2 border-t border-zinc-200 px-4 py-3 sm:px-6">
+          <div className="flex items-center justify-between gap-2 border-t border-zinc-100 px-5 py-3 sm:px-7">
             <span
               className={cn(
-                "text-[12px] font-medium transition-opacity",
+                "flex items-center gap-1.5 text-[12px] font-medium transition-opacity",
                 savedFlash ? "text-emerald-600 opacity-100" : "opacity-0"
               )}
             >
-              ✓ Saved
+              <Check className="h-3.5 w-3.5" />
+              Saved
             </span>
             <div className="flex items-center gap-2">
               <button
                 onClick={onClose}
-                className="rounded-lg border border-zinc-200 bg-white px-3.5 py-1.5 text-[13px] font-medium text-zinc-700 transition hover:border-zinc-400 hover:bg-zinc-50 hover:text-black"
+                className="rounded-md border border-zinc-200 bg-white px-3 py-1.5 text-[13px] font-medium text-zinc-700 transition-colors hover:border-zinc-300 hover:bg-zinc-50 hover:text-zinc-950"
               >
                 Cancel
               </button>
@@ -1685,9 +2371,9 @@ const SettingsModal = ({
                 onClick={handleSave}
                 disabled={!dirty}
                 className={cn(
-                  "rounded-lg px-3.5 py-1.5 text-[13px] font-semibold transition-all duration-200",
+                  "rounded-md px-3 py-1.5 text-[13px] font-medium transition-all",
                   dirty
-                    ? "bg-black text-white hover:bg-zinc-800 active:scale-[0.97]"
+                    ? "bg-zinc-900 text-white hover:bg-zinc-800 active:scale-[0.98]"
                     : "cursor-not-allowed bg-zinc-100 text-zinc-400"
                 )}
               >
@@ -1720,13 +2406,14 @@ const Sidebar = ({
   onLogout,
 }) => {
   const [query, setQuery] = useState("");
-  const pool = section === "chat" ? recentChats : recentMCQ;
+  const isChatLike = section === "chat" || section === "image";
+  const pool = isChatLike ? recentChats : recentMCQ;
   const filtered = pool.filter((r) =>
     r.title.toLowerCase().includes(query.toLowerCase())
   );
 
-  const newLabel = section === "chat" ? "New Chat" : "New Quiz";
-  const recentLabel = section === "chat" ? "Recent Chats" : "Recent Quizzes";
+  const newLabel = isChatLike ? "New Chat" : "New Quiz";
+  const recentLabel = isChatLike ? "Recent Chats" : "Recent Quizzes";
 
   return (
     <>
@@ -1746,128 +2433,114 @@ const Sidebar = ({
           // Mobile: fixed overlay drawer (always 280px wide, slides in/out)
           "fixed inset-y-0 left-0 z-40 w-[280px]",
           open ? "translate-x-0" : "-translate-x-full",
-          // Desktop: in-flow, width animates between 280 and 68
+          // Desktop: in-flow, width animates between 280 and 64
           "sm:relative sm:translate-x-0",
-          open ? "sm:w-[280px]" : "sm:w-[68px]"
+          open ? "sm:w-[280px]" : "sm:w-[64px]"
         )}
         style={{ height: 'var(--app-height, 100vh)' }}
       >
-      {/* Glass surface on white */}
-      <div
-        className={cn(
-          "absolute inset-0",
-          "bg-white/70 backdrop-blur-2xl backdrop-saturate-150",
-          "border-r border-zinc-200/80",
-          "shadow-[inset_-1px_0_0_rgba(255,255,255,0.8)]"
-        )}
-      />
-      <div className="pointer-events-none absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-zinc-300/60 to-transparent" />
+      {/* Clean white surface with single hairline border */}
+      <div className="absolute inset-0 bg-white border-r border-zinc-100" />
 
       <div className="relative flex h-full flex-col">
         {/* Header — Brand + Toggle */}
         <div
           className={cn(
-            "flex items-center px-3 pb-3 pt-4",
-            open ? "justify-between" : "justify-center"
+            "flex items-center pt-5 pb-4",
+            open ? "justify-between px-4" : "justify-center px-2"
           )}
         >
           {open && (
-            <div className="flex items-center gap-2">
-              <QuasarLogo className="h-7 w-7 text-black" />
-              <span className="text-[15px] font-bold tracking-tight text-black">
-                Study Buddy
-              </span>
-            </div>
+            <span
+              className="text-[15px] font-bold tracking-tight text-zinc-950"
+              style={{ fontFamily: "'Manrope', system-ui, sans-serif", letterSpacing: "-0.025em" }}
+            >
+              Study Buddy
+            </span>
           )}
           <button
             data-testid="sidebar-toggle"
             onClick={onToggle}
-            className="flex h-8 w-8 items-center justify-center rounded-md text-zinc-500 transition hover:bg-black/5 hover:text-black"
+            className="flex h-7 w-7 items-center justify-center rounded-md text-zinc-400 transition-colors hover:bg-zinc-100 hover:text-zinc-900"
             aria-label="Toggle sidebar"
           >
             {open ? (
-              <PanelLeftClose className="h-[18px] w-[18px]" />
+              <PanelLeftClose className="h-[16px] w-[16px]" />
             ) : (
-              <PanelLeftOpen className="h-[18px] w-[18px]" />
+              <PanelLeftOpen className="h-[16px] w-[16px]" />
             )}
           </button>
         </div>
 
-        {/* Section tabs moved to top bar — kept here as a spacer */}
-
         {/* New button */}
-        <div className="mt-3 px-3">
+        <div className={cn("px-3", !open && "px-0 flex justify-center")}>
           <button
             data-testid="new-button"
             onClick={onNew}
             className={cn(
-              "group flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-all duration-200 active:scale-[0.98]",
-              "bg-black text-white hover:bg-zinc-800 shadow-sm",
-              !open && "justify-center px-0"
+              "group items-center gap-2.5 rounded-lg border border-zinc-200 bg-white text-[13px] font-medium text-zinc-700 transition-all hover:border-zinc-300 hover:bg-zinc-50 hover:text-zinc-950 active:scale-[0.99]",
+              open ? "flex w-full px-3 py-2" : "flex h-9 w-9 justify-center"
             )}
+            title={!open ? newLabel : undefined}
           >
-            <Plus className="h-[18px] w-[18px] shrink-0 transition-transform duration-200 group-hover:rotate-90" />
+            <Plus className="h-[15px] w-[15px] shrink-0 text-zinc-500 transition-transform group-hover:rotate-90 group-hover:text-zinc-900" />
             {open && <span className="truncate">{newLabel}</span>}
           </button>
         </div>
 
         {/* Search */}
         {open && (
-          <div className="mt-3 px-3">
+          <div className="mt-2 px-3">
             <div className="relative">
-              <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-400" />
+              <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-zinc-400" />
               <input
                 data-testid="search-input"
                 value={query}
                 onChange={(e) => setQuery(e.target.value)}
                 placeholder={
-                  section === "chat" ? "Search chats..." : "Search quizzes..."
+                  (section === "chat" || section === "image") ? "Search chats" : "Search quizzes"
                 }
-                className="w-full rounded-lg bg-white/80 py-2 pl-9 pr-3 text-sm text-black placeholder:text-zinc-400 outline-none ring-1 ring-zinc-200 transition focus:bg-white focus:ring-black/20"
+                className="w-full rounded-lg border border-transparent bg-zinc-100/60 py-1.5 pl-8 pr-3 text-[13px] text-zinc-900 placeholder:text-zinc-400 outline-none transition focus:border-zinc-200 focus:bg-white"
               />
             </div>
           </div>
         )}
 
         {/* Recents */}
-        <div className="mt-4 flex-1 overflow-hidden">
+        <div className="mt-5 flex-1 overflow-hidden">
           {open && (
-            <div className="px-5 pb-2 text-[11px] font-medium uppercase tracking-wider text-zinc-500">
+            <div className="px-4 pb-1.5 text-[10.5px] font-semibold uppercase tracking-[0.08em] text-zinc-400">
               {recentLabel}
             </div>
           )}
           <div className="h-full overflow-y-auto px-2 pb-4 [scrollbar-width:thin]">
-            <ul className="space-y-0.5">
+            <ul className="space-y-px">
               {filtered.map((item) => (
                 <li key={item.id}>
                   <div
                     className={cn(
-                      "group flex w-full items-center gap-3 rounded-md px-3 py-2 text-left transition-colors",
+                      "group relative flex items-center gap-2 rounded-md text-left transition-colors",
                       activeId === item.id
-                        ? "bg-black/[0.06] text-black"
-                        : "text-zinc-600 hover:bg-black/[0.04] hover:text-black",
-                      !open && "justify-center px-0"
+                        ? "bg-zinc-100 text-zinc-950"
+                        : "text-zinc-600 hover:bg-zinc-50 hover:text-zinc-900",
+                      open ? "w-full px-2 py-1.5" : "mx-auto h-8 w-8 justify-center"
                     )}
                   >
                     <button
                       data-testid={`recent-item-${item.id}`}
                       onClick={() => onSelect(item.id)}
                       className={cn(
-                        "flex min-w-0 flex-1 items-center gap-3 text-left",
-                        !open && "justify-center"
+                        "flex items-center gap-2 text-left",
+                        open ? "min-w-0 flex-1" : "h-full w-full justify-center"
                       )}
                       title={item.title}
                     >
-                      <MessageSquare className="h-[15px] w-[15px] shrink-0" />
-                      {open && (
-                        <div className="flex min-w-0 flex-1 flex-col">
-                          <span className="truncate text-[13px] font-medium">
-                            {item.title}
-                          </span>
-                          <span className="text-[11px] text-zinc-500">
-                            {item.date}
-                          </span>
-                        </div>
+                      {open ? (
+                        <span className="min-w-0 flex-1 truncate text-[13px]">
+                          {item.title}
+                        </span>
+                      ) : (
+                        <MessageSquare className="h-[14px] w-[14px] shrink-0" />
                       )}
                     </button>
                     {open && (
@@ -1877,19 +2550,19 @@ const Sidebar = ({
                           e.stopPropagation();
                           onDelete(item.id);
                         }}
-                        className="flex h-6 w-6 shrink-0 items-center justify-center rounded text-zinc-400 opacity-0 transition hover:bg-red-50 hover:text-red-600 group-hover:opacity-100"
+                        className="flex h-5 w-5 shrink-0 items-center justify-center rounded text-zinc-400 transition hover:bg-red-50 hover:text-red-600 sm:opacity-0 sm:group-hover:opacity-100"
                         aria-label="Delete"
                         title="Delete"
                       >
-                        <Trash2 className="h-[14px] w-[14px]" />
+                        <Trash2 className="h-[12px] w-[12px]" />
                       </button>
                     )}
                   </div>
                 </li>
               ))}
               {open && filtered.length === 0 && (
-                <li className="px-3 py-6 text-center text-xs text-zinc-500">
-                  No {section === "chat" ? "chats" : "quizzes"} found
+                <li className="px-3 py-8 text-center text-[12px] text-zinc-400">
+                  No {(section === "chat" || section === "image") ? "chats" : "quizzes"} yet
                 </li>
               )}
             </ul>
@@ -1897,10 +2570,10 @@ const Sidebar = ({
         </div>
 
         {/* Footer — User profile */}
-        <div className="mt-auto shrink-0 border-t border-zinc-200/80 p-3">
+        <div className="mt-auto shrink-0 border-t border-zinc-100 p-3">
           <div className={cn(
-            "flex w-full items-center gap-3 rounded-lg px-3 py-2",
-            !open && "justify-center px-0"
+            "flex w-full items-center gap-2.5 rounded-md",
+            !open && "justify-center"
           )}>
             {user?.image ? (
               <img
@@ -1910,13 +2583,13 @@ const Sidebar = ({
                 referrerPolicy="no-referrer"
               />
             ) : (
-              <div className="flex h-7 w-7 shrink-0 aspect-square items-center justify-center rounded-full bg-black text-xs font-semibold text-white">
+              <div className="flex h-7 w-7 shrink-0 aspect-square items-center justify-center rounded-full bg-zinc-900 text-[11px] font-semibold text-white">
                 {(user?.name || displayName || "?").trim().charAt(0).toUpperCase()}
               </div>
             )}
             {open && (
               <div className="flex min-w-0 flex-1 flex-col text-left">
-                <span className="truncate text-[13px] font-medium text-black">
+                <span className="truncate text-[13px] font-medium text-zinc-900">
                   {user?.name || displayName || "Anonymous"}
                 </span>
                 <span className="truncate text-[11px] text-zinc-500">
@@ -1925,21 +2598,21 @@ const Sidebar = ({
               </div>
             )}
             {open && (
-              <div className="flex items-center gap-1">
+              <div className="flex items-center gap-0.5">
                 <button
                   onClick={onOpenSettings}
-                  className="flex h-7 w-7 items-center justify-center rounded-md text-zinc-400 hover:bg-zinc-100 hover:text-black transition"
+                  className="flex h-7 w-7 items-center justify-center rounded-md text-zinc-400 transition hover:bg-zinc-100 hover:text-zinc-900"
                   title="Settings"
                 >
-                  <Settings className="h-4 w-4" />
+                  <Settings className="h-[14px] w-[14px]" />
                 </button>
                 {user && onLogout && (
                   <button
                     onClick={onLogout}
-                    className="flex h-7 w-7 items-center justify-center rounded-md text-zinc-400 hover:bg-red-50 hover:text-red-600 transition"
+                    className="flex h-7 w-7 items-center justify-center rounded-md text-zinc-400 transition hover:bg-red-50 hover:text-red-600"
                     title="Sign out"
                   >
-                    <X className="h-4 w-4" />
+                    <X className="h-[14px] w-[14px]" />
                   </button>
                 )}
               </div>
@@ -2111,7 +2784,7 @@ const MCQComposer = ({ onSubmitText, onUpload, sendOnEnter, section, onSectionCh
               <input
                 ref={fileRef}
                 type="file"
-                accept=".pdf,image/*"
+                accept="image/*"
                 className="hidden"
                 onChange={(e) => {
                   const f = e.target.files?.[0];
@@ -2127,7 +2800,6 @@ const MCQComposer = ({ onSubmitText, onUpload, sendOnEnter, section, onSectionCh
                 <Upload className="h-[14px] w-[14px] sm:h-[15px] sm:w-[15px]" />
                 <span className="hidden sm:inline">Upload</span>
               </button>
-              <ModeSwitcher value={section} onChange={onSectionChange} />
             </div>
 
             <button
@@ -2323,8 +2995,68 @@ const DraggableComposer = ({ children }) => {
   );
 };
 
+/* ---------------- Slash Commands ---------------- */
+const SLASH_COMMANDS = [
+  {
+    id: "explain",
+    label: "Explain",
+    description: "Break down a concept simply",
+    icon: Lightbulb,
+    prompt: "Explain this in simple terms: ",
+  },
+  {
+    id: "summarize",
+    label: "Summarize",
+    description: "Condense the key points",
+    icon: FileText,
+    prompt: "Summarize the following: ",
+  },
+  {
+    id: "code",
+    label: "Code",
+    description: "Write or debug code",
+    icon: Code,
+    prompt: "Write code that ",
+  },
+  {
+    id: "fix",
+    label: "Fix",
+    description: "Find and fix issues in text or code",
+    icon: Wand2,
+    prompt: "Find and fix issues in: ",
+  },
+  {
+    id: "rewrite",
+    label: "Rewrite",
+    description: "Rephrase in a clearer tone",
+    icon: RefreshCw,
+    prompt: "Rewrite this clearly: ",
+  },
+  {
+    id: "compare",
+    label: "Compare",
+    description: "Contrast two things side-by-side",
+    icon: Layers,
+    prompt: "Compare and contrast: ",
+  },
+  {
+    id: "quiz",
+    label: "Quiz me",
+    description: "Generate practice questions",
+    icon: ListChecks,
+    prompt: "Quiz me on: ",
+  },
+  {
+    id: "outline",
+    label: "Outline",
+    description: "Make a structured outline",
+    icon: BookOpen,
+    prompt: "Create a structured outline for: ",
+  },
+];
+
 /* ---------------- Chat Composer (with model switcher + file upload) ---------------- */
-const ChatComposer = ({ models, onSend, onQuizSubmit, model, onModelChange, sendOnEnter, disabled, section, onSectionChange }) => {
+const ChatComposer = ({ models, onSend, onQuizSubmit, onImageGenerate, model, onModelChange, imageModel, onImageModelChange, imageResolution, onImageResolutionChange, imageAspectRatio, onImageAspectRatioChange, sendOnEnter, disabled, section, onSectionChange }) => {
   const [text, setText] = useState("");
   const [files, setFiles] = useState([]); // File[]
   const [pageRanges, setPageRanges] = useState({}); // keyed by file index
@@ -2332,15 +3064,74 @@ const ChatComposer = ({ models, onSend, onQuizSubmit, model, onModelChange, send
   const taRef = useRef(null);
   const fileRef = useRef(null);
 
+  // Slash command popup state
+  const [slashOpen, setSlashOpen] = useState(false);
+  const [slashQuery, setSlashQuery] = useState("");
+  const [slashIndex, setSlashIndex] = useState(0);
+
   const isMcqMode = section === "mcq";
+  const isImageMode = section === "image";
+
+  const filteredCommands = useMemo(() => {
+    const q = slashQuery.trim().toLowerCase();
+    if (!q) return SLASH_COMMANDS;
+    return SLASH_COMMANDS.filter(
+      (c) =>
+        c.label.toLowerCase().includes(q) ||
+        c.id.toLowerCase().includes(q) ||
+        c.description.toLowerCase().includes(q)
+    );
+  }, [slashQuery]);
+
+  // Detect "/" at the start (or after whitespace) and open the menu
+  const updateSlashState = (value, caret) => {
+    // Find the token starting at or before the caret that begins with "/"
+    const upToCaret = value.slice(0, caret);
+    const match = upToCaret.match(/(?:^|\s)(\/[\w-]*)$/);
+    if (match) {
+      setSlashOpen(true);
+      setSlashQuery(match[1].slice(1)); // drop leading "/"
+      setSlashIndex(0);
+    } else {
+      setSlashOpen(false);
+      setSlashQuery("");
+    }
+  };
+
+  const applyCommand = (cmd) => {
+    const el = taRef.current;
+    if (!el) return;
+    const value = text;
+    const caret = el.selectionStart ?? value.length;
+    // Replace the slash token immediately preceding caret
+    const upToCaret = value.slice(0, caret);
+    const after = value.slice(caret);
+    const replaced = upToCaret.replace(/(^|\s)\/[\w-]*$/, (m, lead) => `${lead}${cmd.prompt}`);
+    const newValue = replaced + after;
+    setText(newValue);
+    setSlashOpen(false);
+    setSlashQuery("");
+    // Restore focus + caret to end of inserted prompt
+    requestAnimationFrame(() => {
+      if (taRef.current) {
+        const newCaret = replaced.length;
+        taRef.current.focus();
+        taRef.current.setSelectionRange(newCaret, newCaret);
+        taRef.current.style.height = "auto";
+        taRef.current.style.height = `${Math.min(taRef.current.scrollHeight, 220)}px`;
+      }
+    });
+  };
 
   const handleInput = (e) => {
-    setText(e.target.value);
+    const val = e.target.value;
+    setText(val);
     const el = taRef.current;
     if (el) {
       el.style.height = "auto";
       el.style.height = `${Math.min(el.scrollHeight, 220)}px`;
     }
+    updateSlashState(val, e.target.selectionStart ?? val.length);
   };
 
   const currentModel = models?.find((m) => m.id === model);
@@ -2368,6 +3159,12 @@ const ChatComposer = ({ models, onSend, onQuizSubmit, model, onModelChange, send
         }
       }
       onQuizSubmit(payload);
+    } else if (isImageMode && onImageGenerate) {
+      // Route to image generation — compute size from resolution + aspect ratio
+      const resOption = RESOLUTION_OPTIONS.find(r => r.label === imageResolution) || RESOLUTION_OPTIONS[0];
+      const arOption = ASPECT_RATIOS.find(a => a.label === imageAspectRatio) || ASPECT_RATIOS[0];
+      const size = computeImageSize(resOption.base, arOption);
+      onImageGenerate(text.trim(), size);
     } else {
       // Route to chat
       onSend(text, files);
@@ -2382,6 +3179,30 @@ const ChatComposer = ({ models, onSend, onQuizSubmit, model, onModelChange, send
   };
 
   const handleKey = (e) => {
+    // Slash menu navigation
+    if (slashOpen && filteredCommands.length > 0) {
+      if (e.key === "ArrowDown") {
+        e.preventDefault();
+        setSlashIndex((i) => (i + 1) % filteredCommands.length);
+        return;
+      }
+      if (e.key === "ArrowUp") {
+        e.preventDefault();
+        setSlashIndex((i) => (i - 1 + filteredCommands.length) % filteredCommands.length);
+        return;
+      }
+      if (e.key === "Enter" || e.key === "Tab") {
+        e.preventDefault();
+        applyCommand(filteredCommands[slashIndex]);
+        return;
+      }
+      if (e.key === "Escape") {
+        e.preventDefault();
+        setSlashOpen(false);
+        return;
+      }
+    }
+
     const isSendCombo = sendOnEnter
       ? e.key === "Enter" && !e.shiftKey
       : e.key === "Enter" && (e.metaKey || e.ctrlKey);
@@ -2389,6 +3210,12 @@ const ChatComposer = ({ models, onSend, onQuizSubmit, model, onModelChange, send
       e.preventDefault();
       handleSubmit();
     }
+  };
+
+  const handleSelectionChange = () => {
+    const el = taRef.current;
+    if (!el) return;
+    updateSlashState(text, el.selectionStart ?? text.length);
   };
 
   const handleFilePick = async (e) => {
@@ -2510,24 +3337,149 @@ const ChatComposer = ({ models, onSend, onQuizSubmit, model, onModelChange, send
           )}
 
           {/* Textarea row with mode badge */}
-          <div className="flex items-start gap-2 px-4 pt-3 pb-2">
+          <div className="relative flex items-start gap-2 px-4 pt-3 pb-2">
             {/* Mode badge pill — non-removable */}
             <span
               data-testid="mode-badge"
               className="mt-0.5 inline-flex shrink-0 select-none items-center rounded-full bg-amber-100 px-2 py-0.5 text-[11px] font-semibold text-amber-700"
             >
-              {isMcqMode ? "@MCQ" : "@Chat"}
+              {isMcqMode ? "@MCQ" : isImageMode ? "@Image" : "@Chat"}
             </span>
-            <textarea
-              data-testid="chat-textarea"
-              ref={taRef}
-              rows={1}
-              value={text}
-              onChange={handleInput}
-              onKeyDown={handleKey}
-              placeholder={isMcqMode ? "Paste text or describe what to quiz on..." : "Ask anything — attach an image or PDF to include context..."}
-              className="block max-h-[220px] w-full resize-none bg-transparent text-[15px] leading-relaxed text-black placeholder:text-zinc-400 outline-none"
-            />
+
+            {/* Textarea + bold-mirror overlay */}
+            <div className="relative flex-1 min-w-0">
+              {/* Mirror overlay: shows the same text but with /command bolded */}
+              {!isMcqMode && !isImageMode && (() => {
+                // Find /command token at start or after whitespace
+                const m = text.match(/(^|.*?\s)(\/[\w-]*)([\s\S]*)$/);
+                if (!m) return null;
+                const [, before, slash, after] = m;
+                return (
+                  <div
+                    aria-hidden
+                    className="pointer-events-none absolute inset-0 select-none whitespace-pre-wrap break-words text-[15px] leading-relaxed text-black"
+                    style={{ fontFamily: "inherit" }}
+                  >
+                    <span style={{ color: "transparent" }}>{before}</span>
+                    <span className="font-bold text-zinc-900">{slash}</span>
+                    <span style={{ color: "transparent" }}>{after}</span>
+                  </div>
+                );
+              })()}
+
+              <textarea
+                data-testid="chat-textarea"
+                ref={taRef}
+                rows={1}
+                value={text}
+                onChange={handleInput}
+                onKeyDown={handleKey}
+                onSelect={handleSelectionChange}
+                onBlur={() => setTimeout(() => setSlashOpen(false), 150)}
+                placeholder={isMcqMode ? "Paste text or describe what to quiz on..." : isImageMode ? "Describe the image you want to generate..." : "Ask anything — type / for commands, or attach an image / PDF..."}
+                className={cn(
+                  "relative block max-h-[220px] w-full resize-none bg-transparent text-[15px] leading-relaxed outline-none placeholder:text-zinc-400",
+                  // Hide the slash token visually (rendered by overlay) but only when overlay is active
+                  !isMcqMode && !isImageMode && /(^|\s)\/[\w-]*/.test(text)
+                    ? "text-transparent caret-zinc-900 selection:bg-zinc-200/80 selection:text-transparent"
+                    : "text-black"
+                )}
+              />
+            </div>
+
+            {/* Slash command popup — compact, refined */}
+            {slashOpen && !isMcqMode && !isImageMode && filteredCommands.length > 0 && (
+              <div
+                data-testid="slash-menu"
+                className="absolute bottom-full left-2 right-2 z-40 mb-2.5 overflow-hidden rounded-xl border-2 border-black bg-white shadow-[4px_4px_0_0_#000] sm:right-auto sm:w-[360px]"
+                onMouseDown={(e) => e.preventDefault()}
+              >
+                {/* Compact header */}
+                <div className="flex items-center justify-between border-b border-zinc-200 bg-zinc-50/50 px-3 py-1.5">
+                  <div className="flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-[0.14em] text-zinc-700">
+                    <span className="flex h-3.5 w-3.5 items-center justify-center rounded-sm bg-black font-mono text-[9px] font-extrabold text-white">/</span>
+                    Commands
+                    <span className="text-zinc-300">·</span>
+                    <span className="font-mono normal-case tracking-normal text-zinc-400">{filteredCommands.length}</span>
+                  </div>
+                  <div className="flex items-center gap-0.5 text-[9px] text-zinc-400">
+                    <kbd className="inline-flex h-[15px] min-w-[15px] items-center justify-center rounded border border-zinc-300 bg-white px-0.5 font-mono text-[9px] font-semibold text-zinc-600">↑↓</kbd>
+                    <kbd className="inline-flex h-[15px] min-w-[15px] items-center justify-center rounded border border-zinc-300 bg-white px-0.5 font-mono text-[9px] font-semibold text-zinc-600">↵</kbd>
+                    <kbd className="inline-flex h-[15px] items-center rounded border border-zinc-300 bg-white px-1 font-mono text-[9px] font-semibold text-zinc-600">esc</kbd>
+                  </div>
+                </div>
+
+                {/* Command list — tight rows */}
+                <div className="max-h-[260px] overflow-y-auto py-1 [scrollbar-width:thin]">
+                  {filteredCommands.map((cmd, i) => {
+                    const Icon = cmd.icon;
+                    const active = i === slashIndex;
+                    return (
+                      <button
+                        key={cmd.id}
+                        type="button"
+                        onMouseEnter={() => setSlashIndex(i)}
+                        onClick={() => applyCommand(cmd)}
+                        className={cn(
+                          "flex w-full items-center gap-2.5 px-3 py-1.5 text-left transition-colors",
+                          active ? "bg-zinc-100" : "hover:bg-zinc-50"
+                        )}
+                      >
+                        {/* Compact icon */}
+                        <span
+                          className={cn(
+                            "flex h-6 w-6 shrink-0 items-center justify-center rounded-md transition-colors",
+                            active ? "bg-black text-white" : "bg-zinc-100 text-zinc-600"
+                          )}
+                        >
+                          <Icon className="h-3.5 w-3.5" />
+                        </span>
+
+                        {/* Single-line: label + description, with slash code on the right */}
+                        <div className="flex min-w-0 flex-1 items-baseline gap-2">
+                          <span className="text-[13px] font-semibold text-black">{cmd.label}</span>
+                          <span className="min-w-0 truncate text-[11.5px] font-normal text-zinc-500">
+                            {cmd.description}
+                          </span>
+                        </div>
+
+                        {/* Slash code on the right — only visible on active */}
+                        <code
+                          className={cn(
+                            "shrink-0 rounded border px-1 py-px font-mono text-[10px] font-semibold transition-all",
+                            active
+                              ? "border-black bg-black text-white"
+                              : "border-zinc-200 bg-white text-zinc-400 opacity-60"
+                          )}
+                        >
+                          /{cmd.id}
+                        </code>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+
+            {/* No-match state — same compact frame */}
+            {slashOpen && !isMcqMode && !isImageMode && filteredCommands.length === 0 && (
+              <div
+                className="absolute bottom-full left-2 right-2 z-40 mb-2.5 rounded-xl border-2 border-black bg-white px-3 py-2.5 shadow-[4px_4px_0_0_#000] sm:right-auto sm:w-[360px]"
+                onMouseDown={(e) => e.preventDefault()}
+              >
+                <div className="flex items-center gap-2 text-[12px]">
+                  <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-md bg-zinc-100 text-zinc-400">
+                    <Search className="h-3 w-3" />
+                  </span>
+                  <span className="text-zinc-500">
+                    No match for{" "}
+                    <code className="rounded border border-zinc-300 bg-zinc-50 px-1 py-px font-mono text-[10.5px] font-semibold text-black">
+                      /{slashQuery}
+                    </code>
+                  </span>
+                </div>
+              </div>
+            )}
           </div>
 
           <div className="flex flex-wrap items-center justify-between gap-2 px-2 pb-1 pt-1">
@@ -2535,29 +3487,54 @@ const ChatComposer = ({ models, onSend, onQuizSubmit, model, onModelChange, send
               <input
                 ref={fileRef}
                 type="file"
-                accept=".pdf,image/*"
+                accept="image/*"
                 multiple={!isMcqMode}
                 className="hidden"
                 onChange={handleFilePick}
               />
-              <button
-                data-testid="chat-attach"
-                onClick={() => supportsVision && fileRef.current?.click()}
-                disabled={!supportsVision}
-                title={supportsVision ? "Attach image or PDF" : "This model does not support image or file attachments"}
-                className={cn(
-                  "inline-flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-[13px] font-medium transition",
-                  supportsVision 
-                    ? "border-zinc-200 bg-white text-zinc-700 hover:border-zinc-400 hover:bg-zinc-50 hover:text-black"
-                    : "border-zinc-100 bg-zinc-50 text-zinc-400 cursor-not-allowed opacity-60"
-                )}
-              >
-                <Paperclip className="h-[14px] w-[14px]" />
-                <span className="hidden sm:inline">Attach</span>
-              </button>
-              <ModelSwitcher models={models} value={model} onChange={onModelChange} />
-              {/* MCQ-specific controls: complexity picker */}
-              <ModeSwitcher value={section} onChange={onSectionChange} />
+              {/* Attach button — hidden in image mode */}
+              {!isImageMode && (
+                <button
+                  data-testid="chat-attach"
+                  onClick={() => supportsVision && fileRef.current?.click()}
+                  disabled={!supportsVision}
+                  title={supportsVision ? "Attach image" : "This model does not support image or file attachments"}
+                  className={cn(
+                    "inline-flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-[13px] font-medium transition",
+                    supportsVision 
+                      ? "border-zinc-200 bg-white text-zinc-700 hover:border-zinc-400 hover:bg-zinc-50 hover:text-black"
+                      : "border-zinc-100 bg-zinc-50 text-zinc-400 cursor-not-allowed opacity-60"
+                  )}
+                >
+                  <Paperclip className="h-[14px] w-[14px]" />
+                  <span className="hidden sm:inline">Attach</span>
+                </button>
+              )}
+              {/* Image mode: Resolution dropdown & Aspect Ratio dropdown */}
+              {isImageMode && (() => {
+                const selectedModel = IMAGE_MODELS.find(m => m.id === imageModel) || IMAGE_MODELS[0];
+                const availableRes = RESOLUTION_OPTIONS.filter(r =>
+                  selectedModel.resolutions.some(sr => sr.startsWith(String(r.base)))
+                );
+                return (
+                  <>
+                    <ImageDropdown
+                      label={imageResolution}
+                      options={availableRes.map(r => r.label)}
+                      value={imageResolution}
+                      onChange={onImageResolutionChange}
+                      testId="image-resolution"
+                    />
+                    <ImageDropdown
+                      label={imageAspectRatio}
+                      options={ASPECT_RATIOS.map(a => a.label)}
+                      value={imageAspectRatio}
+                      onChange={onImageAspectRatioChange}
+                      testId="image-aspect"
+                    />
+                  </>
+                );
+              })()}
             </div>
 
             <button
@@ -2578,7 +3555,7 @@ const ChatComposer = ({ models, onSend, onQuizSubmit, model, onModelChange, send
         </div>
       </div>
       <p className="mt-3 text-center text-[11px] text-zinc-500">
-        {isMcqMode ? "Study AI can make mistakes. Verify important information." : "Responses may be inaccurate. Verify important information."}
+        {isMcqMode ? "Study AI can make mistakes. Verify important information." : isImageMode ? "Image generation may take a few seconds." : "Responses may be inaccurate. Verify important information."}
       </p>
     </div>
   );
@@ -2852,12 +3829,12 @@ const ImageThumbnail = ({ src, alt }) => {
   );
 };
 
-const ChatMessage = ({ role, content, modelName, modelProvider, files, quiz, isStreaming, onRegenerate }) => {
+const ChatMessage = ({ role, content, modelName, modelProvider, files, quiz, generatedImage, isStreaming, feedback, onFeedback, onRegenerate }) => {
   const isUser = role === "user";
   const [copied, setCopied] = useState(false);
-  const [liked, setLiked] = useState(false);
-  const [unliked, setUnliked] = useState(false);
-  
+  const liked = feedback === "like";
+  const unliked = feedback === "dislike";
+
   const handleCopy = () => {
     if (content) {
       navigator.clipboard.writeText(content);
@@ -2867,13 +3844,11 @@ const ChatMessage = ({ role, content, modelName, modelProvider, files, quiz, isS
   };
 
   const handleLike = () => {
-    setLiked(!liked);
-    setUnliked(false);
+    if (onFeedback) onFeedback(liked ? null : "like");
   };
 
   const handleUnlike = () => {
-    setUnliked(!unliked);
-    setLiked(false);
+    if (onFeedback) onFeedback(unliked ? null : "dislike");
   };
   
   let displayContent = content || "";
@@ -2881,6 +3856,22 @@ const ChatMessage = ({ role, content, modelName, modelProvider, files, quiz, isS
     displayContent = displayContent.replace(/<think>[\s\S]*?<\/think>/g, "");
     displayContent = displayContent.replace(/<think>[\s\S]*$/, "");
     displayContent = displayContent.trim();
+  }
+
+  // For image generation messages, hide the prompt text — show only the image
+  // Two cases:
+  //   1. New session: generatedImage prop is set → hide displayContent text
+  //   2. Loaded from history: content contains ![Generated Image](url) markdown → strip the text after image
+  const isImageMessage = !isUser && (generatedImage || /!\[Generated Image\]\([^)]+\)/.test(displayContent));
+  if (isImageMessage) {
+    if (generatedImage) {
+      // New session — image rendered separately, hide all text
+      displayContent = "";
+    } else {
+      // Loaded from history — keep only the image markdown, drop the trailing prompt text
+      const imageMatch = displayContent.match(/!\[Generated Image\]\([^)]+\)/);
+      displayContent = imageMatch ? imageMatch[0] : "";
+    }
   }
   return (
     <div
@@ -2903,10 +3894,6 @@ const ChatMessage = ({ role, content, modelName, modelProvider, files, quiz, isS
       >
         {!isUser && (
           <div className="mb-1.5 flex items-center gap-1.5">
-            {/* Bot avatar — shown inline on mobile only */}
-            <div className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-black text-white sm:hidden">
-              <Bot className="h-3 w-3" />
-            </div>
             {modelName && (
               <span className="flex items-center gap-1.5 text-[10.5px] font-semibold uppercase tracking-wider text-zinc-500" style={{ fontStyle: "italic" }}>
                 {modelProvider && (
@@ -2969,6 +3956,18 @@ const ChatMessage = ({ role, content, modelName, modelProvider, files, quiz, isS
           )
         )}
 
+        {/* Generated image */}
+        {!isUser && generatedImage && (
+          <div className="mt-2">
+            <img
+              src={generatedImage}
+              alt="AI Generated"
+              className="max-w-full rounded-xl border border-zinc-200 shadow-sm"
+              style={{ maxHeight: "400px", objectFit: "contain" }}
+            />
+          </div>
+        )}
+
         {/* Inline quiz (for assistant messages) */}
         {!isUser && Array.isArray(quiz) && quiz.length > 0 && (
           <div className={cn(content && "mt-3")}>
@@ -2992,6 +3991,36 @@ const ChatMessage = ({ role, content, modelName, modelProvider, files, quiz, isS
             <button onClick={handleUnlike} title="Bad response" className={cn("flex h-7 w-7 items-center justify-center rounded-md hover:bg-zinc-100 transition-colors", unliked ? "text-red-600 bg-red-50" : "hover:text-zinc-700")}>
               <ThumbsDown className="h-[13px] w-[13px]" />
             </button>
+            {/* Download & Delete buttons for image messages */}
+            {generatedImage && (
+              <>
+                <div className="mx-1 h-4 w-px bg-zinc-200" />
+                <a
+                  href={generatedImage}
+                  download={`study-buddy-image-${Date.now()}.png`}
+                  title="Download image"
+                  className="flex h-7 w-7 items-center justify-center rounded-md hover:bg-zinc-100 hover:text-zinc-700 transition-colors"
+                >
+                  <Download className="h-[13px] w-[13px]" />
+                </a>
+                <button
+                  onClick={() => {
+                    if (confirm("Delete this image permanently?")) {
+                      // Delete from server
+                      fetch(`/api/delete-image`, {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({ path: generatedImage }),
+                      }).catch(() => {});
+                    }
+                  }}
+                  title="Delete image"
+                  className="flex h-7 w-7 items-center justify-center rounded-md hover:bg-red-50 hover:text-red-600 transition-colors"
+                >
+                  <Trash2 className="h-[13px] w-[13px]" />
+                </button>
+              </>
+            )}
           </div>
         )}
       </div>
@@ -3005,30 +4034,135 @@ const ChatMessage = ({ role, content, modelName, modelProvider, files, quiz, isS
   );
 };
 
-const TypingIndicator = ({ icon, label = "Thinking", modelProvider }) => (
-  <div data-testid="typing-indicator" className="flex gap-3">
-    {/* Avatar with sonar pulse rings */}
-    <div className="relative h-8 w-8 shrink-0">
-      <span className="sa-ping-ring" />
-      <span className="sa-ping-ring delay-1" />
-      <div className="sa-breathe relative flex h-8 w-8 items-center justify-center rounded-full bg-black text-white ring-1 ring-black/10">
-        {icon || <Bot className="h-4 w-4" />}
-      </div>
-    </div>
+const TypingIndicator = ({ icon, label = "Thinking", modelProvider }) => {
+  const isImageMode = label === "Creating image";
 
-    {/* Bubble: EQ bars + shimmering "Thinking" text */}
-    <div className="flex items-center gap-3 rounded-2xl border border-zinc-200 bg-white px-4 py-3 shadow-sm">
-      <div className="flex h-[18px] items-end gap-[3px]">
-        <span className="sa-eq-bar" />
-        <span className="sa-eq-bar" />
-        <span className="sa-eq-bar" />
-        <span className="sa-eq-bar" />
-        <span className="sa-eq-bar" />
+  // Special blur-based animation for image generation
+  if (isImageMode) {
+    return <ImageGenerationLoader />;
+  }
+
+  return (
+    <div data-testid="typing-indicator" className="flex gap-3">
+      {/* Avatar with sonar pulse rings — hidden on mobile, shown on desktop */}
+      <div className="relative hidden h-8 w-8 shrink-0 sm:block">
+        <span className="sa-ping-ring" />
+        <span className="sa-ping-ring delay-1" />
+        <div className="sa-breathe relative flex h-8 w-8 items-center justify-center rounded-full bg-black text-white ring-1 ring-black/10">
+          {icon || <Bot className="h-4 w-4" />}
+        </div>
       </div>
-      <span className="sa-shimmer-text text-[13px]">{label}</span>
+
+      {/* Bubble: EQ bars + shimmering "Thinking" text */}
+      <div className="flex items-center gap-3 rounded-2xl border border-zinc-200 bg-white px-4 py-3 shadow-sm">
+        <div className="flex h-[18px] items-end gap-[3px]">
+          <span className="sa-eq-bar" />
+          <span className="sa-eq-bar" />
+          <span className="sa-eq-bar" />
+          <span className="sa-eq-bar" />
+          <span className="sa-eq-bar" />
+        </div>
+        <span className="sa-shimmer-text text-[13px]">{label}</span>
+      </div>
     </div>
-  </div>
-);
+  );
+};
+
+/* ---------------- Image Generation Loader (morphing blob — modern minimal) ---------------- */
+const ImageGenerationLoader = () => {
+  const [scrambledStatus, setScrambledStatus] = useState("Imagining…");
+  const [stage, setStage] = useState(0);
+
+  const stages = [
+    "Imagining…",
+    "Sketching shapes…",
+    "Adding details…",
+    "Refining colors…",
+    "Almost there…",
+  ];
+
+  useEffect(() => {
+    const interval = setInterval(() => {
+      setStage((s) => Math.min(s + 1, stages.length - 1));
+    }, 4000);
+    return () => clearInterval(interval);
+  }, []);
+
+  // Text scramble effect
+  useEffect(() => {
+    const target = stages[stage];
+    const chars = "!<>-_\\/[]{}—=+*^?#$%&@";
+    let frame = 0;
+    let interval;
+
+    const update = () => {
+      let output = "";
+      let complete = 0;
+      for (let i = 0; i < target.length; i++) {
+        const start = i * 2;
+        const end = start + 8;
+        if (frame >= end) {
+          output += target[i];
+          complete++;
+        } else if (frame >= start) {
+          output += chars[Math.floor(Math.random() * chars.length)];
+        } else {
+          output += target[i] === " " ? " " : "";
+        }
+      }
+      setScrambledStatus(output);
+      if (complete === target.length) clearInterval(interval);
+      frame++;
+    };
+
+    interval = setInterval(update, 35);
+    return () => clearInterval(interval);
+  }, [stage]);
+
+  return (
+    <div data-testid="image-generation-loader" className="flex gap-3">
+      {/* Avatar — hidden on mobile, shown on desktop */}
+      <div className="relative hidden h-8 w-8 shrink-0 sm:block">
+        <span className="sa-ping-ring" />
+        <span className="sa-ping-ring delay-1" />
+        <div className="sa-breathe relative flex h-8 w-8 items-center justify-center rounded-full bg-black text-white ring-1 ring-black/10">
+          <ImageIcon className="h-4 w-4" />
+        </div>
+      </div>
+
+      {/* Bubble with morphing blob */}
+      <div className="flex flex-col gap-2.5 rounded-2xl border border-zinc-200 bg-white p-3 shadow-sm">
+        <div className="relative flex aspect-square w-[280px] items-center justify-center overflow-hidden rounded-xl bg-zinc-50 sm:w-[320px]">
+          {/* Subtle dotted grid background */}
+          <div
+            className="absolute inset-0 opacity-40"
+            style={{
+              backgroundImage: "radial-gradient(circle, rgba(0,0,0,0.08) 1px, transparent 1px)",
+              backgroundSize: "20px 20px",
+            }}
+          />
+
+          {/* Soft glow halo — pulses gently in the center */}
+          <div className="absolute h-40 w-40 rounded-full bg-zinc-900/5 blur-2xl sa-blob-halo" />
+        </div>
+
+        {/* Status — monospace with scramble effect */}
+        <div className="flex items-center gap-2 px-1">
+          <div className="relative flex h-1.5 w-1.5 shrink-0">
+            <span className="absolute inline-flex h-1.5 w-1.5 animate-ping rounded-full bg-zinc-400 opacity-75" />
+            <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-zinc-900" />
+          </div>
+          <span
+            className="text-[12px] font-medium text-zinc-700"
+            style={{ fontFamily: "ui-monospace, 'SF Mono', Menlo, Consolas, monospace" }}
+          >
+            {scrambledStatus}
+          </span>
+        </div>
+      </div>
+    </div>
+  );
+};
 
 /* ---------------- Hero (per section) ---------------- */
 const CHAT_HEADLINES = [
@@ -3050,65 +4184,62 @@ const CHAT_HEADLINES = [
 ];
 
 const ChatHero = ({ onPick }) => {
-  // Pick a fresh headline on client mount to avoid SSR hydration mismatch
   const [headline, setHeadline] = useState(CHAT_HEADLINES[0]);
   const [mounted, setMounted] = useState(false);
+
   useEffect(() => {
     setHeadline(CHAT_HEADLINES[Math.floor(Math.random() * CHAT_HEADLINES.length)]);
     setMounted(true);
   }, []);
-  const prompts = [
-    { text: "Explain quantum entanglement simply", icon: Sparkles },
-    { text: "Help me draft an email to my professor", icon: FileText },
-    { text: "Debug this JavaScript closure issue", icon: Code },
-    { text: "Summarize the key causes of WWII", icon: BookOpen },
-  ];
-  return (
-    <div className="mx-auto flex w-full max-w-4xl flex-col items-center px-4 py-4 text-center sm:px-6 sm:py-10">
-      {/* Animated logo with pulse */}
-      <div className={cn("relative mb-4 transition-all duration-700 sm:mb-7", mounted ? "opacity-100 translate-y-0" : "opacity-0 translate-y-3")}>
-        <div className="absolute -inset-4 rounded-full bg-gradient-to-br from-zinc-200/40 via-transparent to-zinc-200/40 blur-2xl" />
-        <QuasarLogo className="relative mx-auto h-9 w-9 text-black drop-shadow-lg sm:h-14 sm:w-14" />
-      </div>
 
-      {/* Headline with gradient shimmer */}
+  return (
+    <div className="relative mx-auto flex w-full max-w-2xl flex-col items-center px-5 py-10 text-center sm:px-6 sm:py-14">
+      {/* Soft background grid — barely-there texture for depth */}
+      <div
+        aria-hidden
+        className="pointer-events-none absolute inset-x-0 top-0 -z-10 h-[420px] opacity-[0.35]"
+        style={{
+          backgroundImage:
+            "linear-gradient(to right, rgb(228 228 231 / 0.5) 1px, transparent 1px), linear-gradient(to bottom, rgb(228 228 231 / 0.5) 1px, transparent 1px)",
+          backgroundSize: "32px 32px",
+          maskImage: "radial-gradient(ellipse 60% 50% at 50% 30%, black 40%, transparent 80%)",
+          WebkitMaskImage: "radial-gradient(ellipse 60% 50% at 50% 30%, black 40%, transparent 80%)",
+        }}
+      />
+
+      {/* Headline */}
       <h1
         className={cn(
-          "mx-auto max-w-2xl text-[20px] font-bold leading-[1.15] tracking-tight sm:text-4xl md:text-[44px]",
-          "bg-gradient-to-r from-zinc-900 via-zinc-600 to-zinc-900 bg-[length:200%_auto] bg-clip-text text-transparent",
-          mounted ? "animate-[sa-hero-gradient_4s_ease-in-out_infinite]" : ""
+          "text-balance text-[28px] font-bold leading-[1.1] tracking-tight text-zinc-950 transition-all duration-500 sm:text-[40px] md:text-[52px]",
+          mounted ? "opacity-100 translate-y-0" : "opacity-0 translate-y-2"
         )}
-        style={{ fontFamily: "'Manrope', system-ui, sans-serif" }}
+        style={{ fontFamily: "'Manrope', system-ui, sans-serif", letterSpacing: "-0.025em" }}
       >
         {headline}
       </h1>
 
       {/* Subtitle */}
-      <p className={cn(
-        "mt-1.5 text-[12px] text-zinc-500 transition-all duration-700 delay-200 sm:mt-3 sm:text-[14px]",
-        mounted ? "opacity-100 translate-y-0" : "opacity-0 translate-y-2"
-      )}>
-        Pick a prompt below, or type your own
+      <p
+        className={cn(
+          "mt-3 max-w-[280px] text-balance text-[13.5px] leading-relaxed text-zinc-500 transition-all duration-500 delay-100 sm:mt-4 sm:max-w-md sm:text-[16px]",
+          mounted ? "opacity-100 translate-y-0" : "opacity-0 translate-y-2"
+        )}
+      >
+        Pick a starting point or just start typing your own.
       </p>
 
-      {/* Prompt pills — two-column grid on mobile, flex-wrap on desktop */}
-      <div className={cn(
-        "mt-4 grid w-full grid-cols-1 gap-1.5 xs:grid-cols-2 sm:mt-8 sm:flex sm:flex-wrap sm:justify-center sm:gap-2.5",
-        "transition-all duration-700 delay-300",
-        mounted ? "opacity-100 translate-y-0" : "opacity-0 translate-y-4"
-      )}>
-        {prompts.map(({ text: p, icon: Icon }) => (
-          <button
-            key={p}
-            onClick={() => onPick(p)}
-            className="group flex items-center gap-2 rounded-xl border border-zinc-200 bg-white px-3 py-2.5 text-left text-[12.5px] text-zinc-700 transition-all duration-200 hover:-translate-y-0.5 hover:border-zinc-400 hover:bg-zinc-50 hover:text-black hover:shadow-sm sm:rounded-full sm:px-4 sm:py-2"
-          >
-            <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-lg bg-zinc-100 text-zinc-600 transition-colors group-hover:bg-black group-hover:text-white sm:h-5 sm:w-5 sm:rounded-md">
-              <Icon className="h-3 w-3" />
-            </span>
-            <span className="min-w-0 flex-1 sm:flex-initial">{p}</span>
-          </button>
-        ))}
+      {/* Footer keyboard hint — hidden on mobile (no keyboards there) */}
+      <div
+        className={cn(
+          "mt-6 hidden items-center gap-2 text-[11px] text-zinc-400 transition-all duration-500 delay-500 sm:mt-7 sm:flex",
+          mounted ? "opacity-100 translate-y-0" : "opacity-0 translate-y-2"
+        )}
+      >
+        <span>Type</span>
+        <kbd className="inline-flex h-5 items-center rounded-md border border-zinc-200 bg-white px-1.5 font-mono text-[10px] font-semibold text-zinc-600 shadow-sm">
+          /
+        </kbd>
+        <span>in the prompt for quick commands</span>
       </div>
     </div>
   );
@@ -3224,8 +4355,18 @@ export default function StudyAssistant() {
       setSidebarOpen(false);
     }
   }, []);
-  const [section, setSection] = useState("chat"); // 'chat' | 'mcq'
+  const [section, setSection] = useState("chat"); // 'chat' | 'mcq' | 'image'
   const [activeId, setActiveId] = useState(null);
+
+  // Persist current session (section + activeId) to localStorage
+  // so refresh restores the user to where they were
+  const ACTIVE_SESSION_KEY = "sa.activeSession.v1";
+  useEffect(() => {
+    try {
+      const data = JSON.stringify({ section, activeId });
+      localStorage.setItem(ACTIVE_SESSION_KEY, data);
+    } catch {}
+  }, [section, activeId]);
 
   // Settings (persisted) — start with defaults for SSR, hydrate on mount
   const [settings, setSettings] = useState(DEFAULT_SETTINGS);
@@ -3369,9 +4510,25 @@ export default function StudyAssistant() {
     setRecentMCQ(mapItems(mcqItems));
   };
 
-  // Load from server on mount
+  // Load from server on mount + restore active session
   useEffect(() => {
     refreshHistory();
+    // Restore last active session from localStorage
+    try {
+      const saved = localStorage.getItem(ACTIVE_SESSION_KEY);
+      if (saved) {
+        const { section: savedSection, activeId: savedId } = JSON.parse(saved);
+        if (savedSection && (savedSection === "chat" || savedSection === "mcq" || savedSection === "image")) {
+          setSection(savedSection);
+        }
+        if (savedId) {
+          // Defer the load so refreshHistory can populate sidebar first
+          setTimeout(() => {
+            handleSelect(savedId);
+          }, 100);
+        }
+      }
+    } catch {}
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -3473,7 +4630,27 @@ export default function StudyAssistant() {
   // Chat state
   const [messages, setMessages] = useState([]); // {role, content, model, provider}
   const [isTyping, setIsTyping] = useState(false);
+  const [isProcessingFiles, setIsProcessingFiles] = useState(false);
   const [model, setModel] = useState("");
+  const [imageModel, setImageModel] = useState("gpt-image-2");
+  const [imageResolution, setImageResolution] = useState("1K");
+  const [imageAspectRatio, setImageAspectRatio] = useState("1:1");
+
+  // When image model changes, ensure selected resolution is supported
+  const handleImageModelChange = (newModelId) => {
+    setImageModel(newModelId);
+    const newModel = IMAGE_MODELS.find(m => m.id === newModelId);
+    if (newModel) {
+      const currentBase = (RESOLUTION_OPTIONS.find(r => r.label === imageResolution) || RESOLUTION_OPTIONS[0]).base;
+      const isSupported = newModel.resolutions.some(r => r.startsWith(String(currentBase)));
+      if (!isSupported) {
+        // Pick the first supported resolution
+        const firstRes = newModel.resolutions[0];
+        const matchedOption = RESOLUTION_OPTIONS.find(r => firstRes.startsWith(String(r.base)));
+        if (matchedOption) setImageResolution(matchedOption.label);
+      }
+    }
+  };
   
   // Dynamic models state
   const [models, setModels] = useState(DEFAULT_MODELS);
@@ -3640,6 +4817,87 @@ export default function StudyAssistant() {
       setMcqLoading(false);
     }
   };
+
+  /* --- Image Generation handler ---
+   * Sends prompt to /api/generate-image, displays result in chat messages.
+   * No history context is sent — only the prompt.
+   */
+  const handleImageGenerate = async (prompt, size) => {
+    if (!prompt || !prompt.trim()) return;
+
+    // Add user message to chat
+    const userMsg = { role: "user", content: prompt, isImagePrompt: true };
+    setMessages((prev) => [...prev, userMsg]);
+    setIsTyping(true);
+
+    // Create conversation if needed
+    let convId = activeId;
+    if (!convId) {
+      const title = `Image: ${prompt.slice(0, 30)}${prompt.length > 30 ? "..." : ""}`;
+      const conv = await apiCreateConversation(title, "chat");
+      if (conv?.id) {
+        convId = conv.id;
+        setActiveId(convId);
+        setRecentChats((prev) => [{ id: convId, title, date: "Just now" }, ...prev]);
+      } else {
+        convId = `c_${Date.now()}`;
+        setActiveId(convId);
+      }
+    }
+
+    // Save user message
+    if (convId) {
+      apiSaveMessage(convId, { role: "user", content: prompt });
+    }
+
+    try {
+      const res = await fetch(buildUrl("/api/generate-image"), {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          prompt: prompt.trim(),
+          modelId: imageModel || "gpt-image-2",
+          size: size || "1024x1024",
+        }),
+      });
+
+      const data = await res.json();
+
+      if (!res.ok || data.error) {
+        setMessages((prev) => [
+          ...prev,
+          { role: "error", kind: "generic", content: data.error || "Image generation failed." },
+        ]);
+      } else {
+        const assistantMsg = {
+          role: "assistant",
+          content: data.revisedPrompt || `Generated image for: "${prompt}"`,
+          generatedImage: data.imageUrl,
+          model: data.model,
+        };
+        setMessages((prev) => [...prev, assistantMsg]);
+
+        // Save assistant message with image URL embedded (local path = permanent)
+        if (convId) {
+          apiSaveMessage(convId, {
+            role: "assistant",
+            content: `![Generated Image](${data.imageUrl})\n\n${data.revisedPrompt || `Generated image for: "${prompt}"`}`,
+            model: data.model,
+          });
+        }
+      }
+    } catch (err) {
+      setMessages((prev) => [
+        ...prev,
+        { role: "error", kind: "generic", content: "Couldn't reach the image generation server." },
+      ]);
+    } finally {
+      setIsTyping(false);
+      // Switch back to chat mode after generating
+      setSection("chat");
+    }
+  };
+
   const handleAnswer = (i, opt) => {
     if (answers[i] !== undefined) return;
     setAnswers((prev) => ({ ...prev, [i]: opt }));
@@ -3735,6 +4993,10 @@ export default function StudyAssistant() {
     userScrolledUp.current = false; // Resume auto-scroll on new message
     setMessages((prev) => [...prev, userMsg]);
     setIsTyping(true);
+    if (!currentModel) {
+      setIsTyping(false);
+      return;
+    }
     const modelName = currentModel.name;
     const modelProvider = currentModel.provider;
     const modelId = currentModel.id;
@@ -3747,19 +5009,32 @@ export default function StudyAssistant() {
     });
 
     try {
-      // Convert File objects → Gemini inlineData parts
+      // Convert File objects → Gemini inlineData parts (compresses images)
+      setIsProcessingFiles(incomingFiles.length > 0);
       const fileParts = await filesToInlineParts(incomingFiles);
+      setIsProcessingFiles(false);
 
-      // Send chat history for context-aware conversation
+      // Send chat history for context-aware conversation (exclude image gen messages)
+      // If the last assistant message has feedback, prepend a system note to the new user message
+      const lastAssistantWithFeedback = [...messages]
+        .reverse()
+        .find((m) => m.role === "assistant" && m.feedback);
+      const feedbackNote = lastAssistantWithFeedback
+        ? lastAssistantWithFeedback.feedback === "like"
+          ? "[User liked your previous response.] "
+          : "[User disliked your previous response.] "
+        : "";
       const chatHistoryForApi = messages
-        .filter((m) => m.role === "user" || m.role === "assistant")
+        .filter((m) => (m.role === "user" || m.role === "assistant") && !m.isImagePrompt && !m.generatedImage)
         .map((m) => ({ role: m.role, content: m.content || "" }));
+      // Inject feedback note into the user message text sent to API
+      const apiUserText = feedbackNote + textStr;
 
       const res = await fetch(buildUrl("/api/chat"), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          text: textStr,
+          text: apiUserText,
           files: fileParts,
           modelId,
           messages: chatHistoryForApi,
@@ -3816,6 +5091,56 @@ export default function StudyAssistant() {
       const decoder = new TextDecoder();
       let buffer = "";
 
+      // Typewriter buffer — chunks queue here, drain at steady reading pace
+      let textQueue = "";
+      let streamDone = false;
+      let typewriterRaf = null;
+      let lastTickTime = performance.now();
+
+      // Reveal speed — characters per second.
+      // ~80 chars/sec ≈ comfortable reading + still feels responsive.
+      // Auto-speeds-up if queue grows too large to avoid lag at end of stream.
+      const BASE_CHARS_PER_SEC = 60;
+      const MAX_BUFFER_BEFORE_SPEEDUP = 100;
+
+      const tickTypewriter = (now) => {
+        const dt = (now - lastTickTime) / 1000; // seconds since last tick
+        lastTickTime = now;
+
+        if (textQueue.length > 0) {
+          // Adaptive speed — if queue is large, reveal faster
+          const speedMultiplier = 1 + textQueue.length / MAX_BUFFER_BEFORE_SPEEDUP;
+          const charsToReveal = Math.max(1, Math.floor(dt * BASE_CHARS_PER_SEC * speedMultiplier));
+          const revealed = textQueue.slice(0, charsToReveal);
+          textQueue = textQueue.slice(charsToReveal);
+
+          setMessages((prev) => {
+            const updated = [...prev];
+            const idx = assistantIdx.current;
+            if (idx >= 0 && updated[idx]) {
+              updated[idx] = {
+                ...updated[idx],
+                content: updated[idx].content + revealed,
+              };
+            }
+            return updated;
+          });
+        }
+
+        // Continue ticking if there's still text to reveal OR stream is still going
+        if (textQueue.length > 0 || !streamDone) {
+          typewriterRaf = requestAnimationFrame(tickTypewriter);
+        } else {
+          typewriterRaf = null;
+        }
+      };
+
+      const startTypewriter = () => {
+        if (typewriterRaf) return;
+        lastTickTime = performance.now();
+        typewriterRaf = requestAnimationFrame(tickTypewriter);
+      };
+
       if (reader) {
         while (true) {
           const { done, value } = await reader.read();
@@ -3837,17 +5162,8 @@ export default function StudyAssistant() {
               const delta = chunk.choices?.[0]?.delta?.content;
               if (delta) {
                 fullAssistantContent += delta;
-                setMessages((prev) => {
-                  const updated = [...prev];
-                  const idx = assistantIdx.current;
-                  if (idx >= 0 && updated[idx]) {
-                    updated[idx] = {
-                      ...updated[idx],
-                      content: updated[idx].content + delta,
-                    };
-                  }
-                  return updated;
-                });
+                textQueue += delta;
+                startTypewriter();
               }
               // Capture usage data from chunks (API sends it in final chunk)
               if (chunk.usage) {
@@ -3857,6 +5173,12 @@ export default function StudyAssistant() {
               // Skip non-JSON lines
             }
           }
+        }
+        // Stream finished — typewriter will drain the rest naturally
+        streamDone = true;
+        // Wait for typewriter to finish revealing
+        while (textQueue.length > 0) {
+          await new Promise((r) => setTimeout(r, 50));
         }
       }
 
@@ -3894,6 +5216,7 @@ export default function StudyAssistant() {
         },
       ]);
       setIsTyping(false);
+      setIsProcessingFiles(false);
     }
   };
   const handleRegenerate = async () => {
@@ -3917,6 +5240,10 @@ export default function StudyAssistant() {
     const textStr = lastUserMsg.content;
     const payloadFiles = lastUserMsg.files || [];
     const currentModel = models.find((m) => m.id === model) || models[0];
+    if (!currentModel) {
+      setIsTyping(false);
+      return;
+    }
     const modelName = currentModel.name;
     const modelProvider = currentModel.provider;
 
@@ -3945,6 +5272,43 @@ export default function StudyAssistant() {
       const reader = res.body.getReader();
       const decoder = new TextDecoder("utf-8");
 
+      // Typewriter buffer — reveal at steady reading pace
+      let textQueue = "";
+      let streamDone = false;
+      let typewriterRaf = null;
+      let lastTickTime = performance.now();
+      const BASE_CHARS_PER_SEC = 60;
+      const MAX_BUFFER_BEFORE_SPEEDUP = 100;
+
+      const tickTypewriter = (now) => {
+        const dt = (now - lastTickTime) / 1000;
+        lastTickTime = now;
+        if (textQueue.length > 0) {
+          const speedMultiplier = 1 + textQueue.length / MAX_BUFFER_BEFORE_SPEEDUP;
+          const charsToReveal = Math.max(1, Math.floor(dt * BASE_CHARS_PER_SEC * speedMultiplier));
+          const revealed = textQueue.slice(0, charsToReveal);
+          textQueue = textQueue.slice(charsToReveal);
+          setMessages((prev) => {
+            const updated = [...prev];
+            const idx = assistantIdx.current;
+            if (idx >= 0 && updated[idx]) {
+              updated[idx] = { ...updated[idx], content: updated[idx].content + revealed };
+            }
+            return updated;
+          });
+        }
+        if (textQueue.length > 0 || !streamDone) {
+          typewriterRaf = requestAnimationFrame(tickTypewriter);
+        } else {
+          typewriterRaf = null;
+        }
+      };
+      const startTypewriter = () => {
+        if (typewriterRaf) return;
+        lastTickTime = performance.now();
+        typewriterRaf = requestAnimationFrame(tickTypewriter);
+      };
+
       while (true) {
         const { done, value } = await reader.read();
         if (done) break;
@@ -3959,19 +5323,17 @@ export default function StudyAssistant() {
               const delta = chunk.choices?.[0]?.delta?.content;
               if (delta) {
                 fullAssistantContent += delta;
-                setMessages((prev) => {
-                  const updated = [...prev];
-                  const idx = assistantIdx.current;
-                  if (idx >= 0 && updated[idx]) {
-                    updated[idx] = { ...updated[idx], content: updated[idx].content + delta };
-                  }
-                  return updated;
-                });
+                textQueue += delta;
+                startTypewriter();
               }
               if (chunk.usage) streamUsage = chunk.usage;
             } catch {}
           }
         }
+      }
+      streamDone = true;
+      while (textQueue.length > 0) {
+        await new Promise((r) => setTimeout(r, 50));
       }
 
       if (streamUsage) {
@@ -4003,6 +5365,30 @@ export default function StudyAssistant() {
     setActiveId(null);
   };
 
+  /* --- Like/Dislike feedback --- */
+  const handleSetFeedback = async (messageIdx, value) => {
+    // Update local state
+    setMessages((prev) => {
+      const updated = [...prev];
+      if (updated[messageIdx]) {
+        updated[messageIdx] = { ...updated[messageIdx], feedback: value };
+      }
+      return updated;
+    });
+    // Persist to backend (fire-and-forget)
+    if (activeId) {
+      try {
+        await fetch(buildUrl(`/api/conversations/${activeId}/messages`), {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ messageIndex: messageIdx, feedback: value }),
+        });
+      } catch {
+        // Non-blocking — UI already reflects the change
+      }
+    }
+  };
+
   /* --- Sidebar events --- */
   // On small screens, auto-close the drawer after the user picks an item or
   // hits the section / new buttons so the content area is immediately visible.
@@ -4014,13 +5400,13 @@ export default function StudyAssistant() {
     setActiveId(null);
   };
   const handleNew = () => {
-    if (section === "chat") handleResetChat();
+    if (section === "chat" || section === "image") handleResetChat();
     else handleResetQuiz();
     if (isMobile()) setSidebarOpen(false);
   };
   const handleSelect = async (id) => {
     setActiveId(id);
-    if (section === "chat") {
+    if (section === "chat" || section === "image") {
       // Load conversation messages from server
       setMessages([]);
       setIsTyping(false);
@@ -4032,6 +5418,7 @@ export default function StudyAssistant() {
           model: m.model || undefined,
           provider: m.provider || undefined,
           files: m.files ? JSON.parse(m.files) : undefined,
+          feedback: m.reaction || undefined,
         }));
         setMessages(loaded);
       }
@@ -4063,7 +5450,7 @@ export default function StudyAssistant() {
   // Delete a recent item (chat or MCQ depending on section).
   // If we're deleting the currently-open one, also clear its main-pane state.
   const handleDelete = async (id) => {
-    if (section === "chat") {
+    if (section === "chat" || section === "image") {
       await apiDeleteConversation(id);
       setRecentChats((prev) => prev.filter((c) => c.id !== id));
       if (activeId === id) handleResetChat();
@@ -4171,30 +5558,90 @@ export default function StudyAssistant() {
         <main className="relative flex min-w-0 flex-1 flex-col" style={{ height: 'var(--app-height, 100vh)' }}>
 
 
-          {/* Mobile-only sidebar trigger — shown when drawer is closed on small screens */}
-          {!sidebarOpen && (
+          {/* Top bar — floating pill on both mobile + desktop. Slides on mobile scroll. */}
+          <div
+            aria-hidden={!hamburgerVisible && !sidebarOpen ? false : undefined}
+            className={cn(
+              "absolute left-3 right-3 top-3 z-20 flex h-11 items-center gap-2 rounded-2xl border border-zinc-200/60 bg-white/80 px-2 shadow-sm backdrop-blur-md transition-all duration-300 ease-out",
+              // On desktop: shrink to ~1/3 width and center horizontally
+              "sm:left-1/2 sm:right-auto sm:-translate-x-1/2 sm:w-auto sm:max-w-[480px] sm:px-2.5",
+              // Mobile-only: hide when drawer is open or scrolling down. Desktop is always visible.
+              sidebarOpen
+                ? "max-sm:-translate-y-[120%] max-sm:opacity-0 max-sm:pointer-events-none"
+                : hamburgerVisible
+                ? "translate-y-0 opacity-100 pointer-events-auto sm:-translate-x-1/2"
+                : "max-sm:-translate-y-[120%] max-sm:opacity-0 max-sm:pointer-events-none sm:translate-y-0 sm:opacity-100 sm:pointer-events-auto sm:-translate-x-1/2"
+            )}
+          >
+            {/* Menu trigger — mobile only (desktop has the collapsible sidebar) */}
             <button
               data-testid="mobile-menu"
               onClick={() => setSidebarOpen(true)}
               aria-label="Open sidebar"
-              aria-hidden={!hamburgerVisible}
-              className={cn(
-                "absolute left-3 top-3 z-20 flex h-9 w-9 items-center justify-center rounded-lg border border-zinc-200/40 bg-white/40 text-zinc-700 shadow-sm backdrop-blur-md transition-all duration-300 ease-out hover:border-zinc-400 hover:bg-white/60 hover:text-black sm:hidden",
-                hamburgerVisible
-                  ? "translate-y-0 opacity-100 pointer-events-auto"
-                  : "-translate-y-2 opacity-0 pointer-events-none"
-              )}
+              className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl text-zinc-700 transition-colors hover:bg-zinc-100 hover:text-black active:bg-zinc-200 sm:hidden"
             >
               <Menu className="h-[18px] w-[18px]" />
             </button>
-          )}
+
+            {/* Announcements bell — both mobile and desktop */}
+            <AnnouncementsBell />
+
+            {/* Model switcher — context-aware (chat or image model) */}
+            <div className="min-w-0 flex-1">
+              {section === "image" ? (
+                <ImageDropdown
+                  label={IMAGE_MODELS.find(m => m.id === imageModel)?.name || "Select Model"}
+                  options={IMAGE_MODELS.map(m => m.name)}
+                  value={IMAGE_MODELS.find(m => m.id === imageModel)?.name || ""}
+                  onChange={(name) => {
+                    const found = IMAGE_MODELS.find(m => m.name === name);
+                    if (found) setImageModel(found.id);
+                  }}
+                  testId="image-model"
+                  icon={IMAGE_MODELS.find(m => m.id === imageModel)?.icon}
+                  models={IMAGE_MODELS}
+                />
+              ) : (
+                <ModelSwitcher models={models} value={model} onChange={setModel} />
+              )}
+            </div>
+
+            {/* Section segmented control — Chat / Image / Quiz */}
+            <div className="flex shrink-0 items-center gap-0.5 rounded-xl bg-zinc-100/80 p-0.5">
+              {[
+                { id: "chat", label: "Chat", Icon: MessageCircle },
+                { id: "image", label: "Image", Icon: ImageIcon },
+                { id: "mcq", label: "Quiz", Icon: ListChecks },
+              ].map(({ id, label, Icon }) => {
+                const active = section === id;
+                return (
+                  <button
+                    key={id}
+                    data-testid={`top-section-${id}`}
+                    onClick={() => handleSectionChange(id)}
+                    aria-label={label}
+                    title={label}
+                    className={cn(
+                      "flex h-8 items-center gap-1.5 rounded-lg px-2 transition-colors sm:px-2.5",
+                      active
+                        ? "bg-white text-black shadow-sm"
+                        : "text-zinc-500 hover:text-zinc-800"
+                    )}
+                  >
+                    <Icon className="h-4 w-4" />
+                    <span className="hidden text-[12px] font-medium sm:inline">{label}</span>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
 
           {/* Scroll area */}
           <div
             ref={chatScrollRef}
             className="relative flex flex-1 flex-col overflow-y-auto"
           >
-            {section === "chat" ? (
+            {(section === "chat" || section === "image") ? (
               <>
                 {!hasChat && (
                   <div className="flex flex-1 items-end justify-center px-2 pb-2 pt-14 sm:items-center sm:px-4 sm:py-8">
@@ -4220,13 +5667,32 @@ export default function StudyAssistant() {
                           modelProvider={m.provider}
                           files={m.files}
                           quiz={m.quiz}
+                          generatedImage={m.generatedImage}
                           isStreaming={isTyping && m.role === "assistant" && i === messages.length - 1}
+                          feedback={m.feedback}
+                          onFeedback={(value) => handleSetFeedback(i, value)}
                           onRegenerate={i === messages.length - 1 ? handleRegenerate : undefined}
                         />
                       )
                     )}
-                    {isTyping && (
-                      <TypingIndicator modelProvider={currentModel.provider} />
+                    {isProcessingFiles && (
+                      <div className="flex items-center gap-2 px-4 py-3">
+                        <div className="flex items-center gap-1.5 rounded-xl bg-zinc-100 px-3 py-2">
+                          <Upload className="h-3.5 w-3.5 animate-bounce text-zinc-500" />
+                          <span className="text-[12px] font-medium text-zinc-600">Compressing image...</span>
+                          <span className="flex gap-0.5">
+                            <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-zinc-400" style={{ animationDelay: "0ms" }} />
+                            <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-zinc-400" style={{ animationDelay: "150ms" }} />
+                            <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-zinc-400" style={{ animationDelay: "300ms" }} />
+                          </span>
+                        </div>
+                      </div>
+                    )}
+                    {isTyping && currentModel && (
+                      <TypingIndicator
+                        modelProvider={currentModel.provider}
+                        label={messages.length > 0 && messages[messages.length - 1]?.isImagePrompt ? "Creating image" : "Thinking"}
+                      />
                     )}
                   </div>
                 )}
@@ -4499,8 +5965,15 @@ export default function StudyAssistant() {
                 models={models}
                 onSend={handleSend}
                 onQuizSubmit={startQuiz}
+                onImageGenerate={handleImageGenerate}
                 model={model}
                 onModelChange={handleModelChange}
+                imageModel={imageModel}
+                onImageModelChange={handleImageModelChange}
+                imageResolution={imageResolution}
+                onImageResolutionChange={setImageResolution}
+                imageAspectRatio={imageAspectRatio}
+                onImageAspectRatioChange={setImageAspectRatio}
                 sendOnEnter={settings.sendOnEnter}
                 disabled={isTyping}
                 section={section}

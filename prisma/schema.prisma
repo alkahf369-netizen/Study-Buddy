@@ -16,6 +16,8 @@ model User {
   email              String?          @unique
   emailVerified      DateTime?
   image              String?
+  role               String           @default("user") // 'user' | 'admin'
+  isBanned           Boolean          @default(false)
   accounts           Account[]
   sessions           Session[]
   conversations      Conversation[]
@@ -24,6 +26,7 @@ model User {
   preferences        UserPreferences?
   testSessions       TestSession[]    @relation("OwnedTestSessions")
   testAttemptsAsUser TestAttempt[]    @relation("TestAttemptsByUser")
+  announcements      Announcement[]   @relation("CreatedAnnouncements")
   createdAt          DateTime         @default(now())
   updatedAt          DateTime         @updatedAt
 }
@@ -59,15 +62,37 @@ model Session {
 // ========================
 
 model ApiKey {
-  id        String   @id @default(cuid())
-  name      String
-  key       String
-  endpoint  String?
-  isActive  Boolean  @default(false)
-  userId    String
-  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  id         String       @id @default(cuid())
+  name       String
+  key        String
+  endpoint   String?
+  isActive   Boolean      @default(false)
+  isPublic   Boolean      @default(false) // Admin-managed public key for all users
+  isEnabled  Boolean      @default(true)  // Admin can disable a key
+  tokenLimit Int?                          // Max tokens allowed (null = unlimited)
+  tokenUsed  Int          @default(0)     // Total tokens consumed
+  userId     String
+  user       User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  usageLogs  TokenUsage[]
+  createdAt  DateTime     @default(now())
+  updatedAt  DateTime     @updatedAt
+}
+
+model TokenUsage {
+  id           String   @id @default(cuid())
+  apiKeyId     String
+  apiKey       ApiKey   @relation(fields: [apiKeyId], references: [id], onDelete: Cascade)
+  model        String
+  inputTokens  Int
+  outputTokens Int
+  totalTokens  Int
+  endpoint     String   @default("chat") // 'chat' | 'quiz'
+  userId       String?
+  createdAt    DateTime @default(now())
+
+  @@index([apiKeyId])
+  @@index([userId])
+  @@index([createdAt])
 }
 
 model Quiz {
@@ -112,6 +137,7 @@ model Message {
   model          String?
   provider       String?
   files          String?
+  reaction       String?      // 'like' | 'dislike' | null
   conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
   conversationId String
   createdAt      DateTime     @default(now())
@@ -125,6 +151,25 @@ model UserPreferences {
   sendOnEnter    Boolean  @default(true)
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt
+}
+
+// ========================
+// Announcements (admin → all users)
+// ========================
+
+model Announcement {
+  id          String    @id @default(cuid())
+  title       String
+  message     String
+  type        String    @default("info") // 'info' | 'warning' | 'maintenance'
+  isActive    Boolean   @default(true)
+  expiresAt   DateTime?
+  createdById String
+  createdBy   User      @relation("CreatedAnnouncements", fields: [createdById], references: [id], onDelete: Cascade)
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  @@index([isActive, expiresAt])
 }
 
 // ========================

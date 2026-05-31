@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { auth } from '@/auth';
 import { decrypt } from '@/lib/encryption';
+import { getPublicApiKey } from '@/lib/admin';
 import { extractTextFromMultiplePdfs, extractTextFromPdfRange } from '@/lib/quiz/pdf-extractor';
 import { StreamingParser } from '@/lib/quiz/streaming-parser';
 import type { FilePayload, QuizQuestion, DoneEvent } from '@/lib/quiz/types';
@@ -70,14 +71,31 @@ export async function POST(req: Request) {
 
     let apiKey = process.env.NANO_GPT_API_KEY;
     let apiEndpoint = process.env.AI_API_ENDPOINT || "https://nano-gpt.com/api/v1/chat/completions";
+    let usedKeyId: string | null = null;
 
     if (session?.user?.id) {
       const activeKey = await prisma.apiKey.findFirst({
-        where: { userId: session.user.id, isActive: true },
-        select: { key: true, endpoint: true }
+        where: { userId: session.user.id, isActive: true, isPublic: false },
+        select: { id: true, key: true, endpoint: true }
       });
-      if (activeKey?.key) apiKey = decrypt(activeKey.key);
-      if (activeKey?.endpoint) apiEndpoint = activeKey.endpoint;
+      if (activeKey?.key) {
+        apiKey = decrypt(activeKey.key);
+        if (activeKey.endpoint) apiEndpoint = activeKey.endpoint;
+        usedKeyId = activeKey.id;
+      }
+    }
+
+    // Fall back to public API key if no user key
+    if (!usedKeyId || !apiKey || apiKey.includes('your_nano_gpt_api_key_here')) {
+      const publicKey = await getPublicApiKey();
+      if (publicKey) {
+        if (publicKey.tokenLimit && publicKey.tokenUsed >= publicKey.tokenLimit) {
+          return NextResponse.json({ error: "Public API token limit reached. Please add your own API key in Settings." }, { status: 429 });
+        }
+        apiKey = decrypt(publicKey.key);
+        if (publicKey.endpoint) apiEndpoint = publicKey.endpoint;
+        usedKeyId = publicKey.id;
+      }
     }
 
     // Auto-correct endpoint if it's just a base URL
@@ -416,6 +434,33 @@ export async function POST(req: Request) {
               if (fallbackData) doneEvent.fallbackData = fallbackData;
 
               writeSSE("done", doneEvent);
+
+              // Track token usage (non-blocking)
+              if (usedKeyId && fullResponseText.length > 0) {
+                const outputTokens = Math.ceil(fullResponseText.length / 4);
+                const inputTokens = Math.ceil((text || '').length / 4) + (files ? files.length * 500 : 0);
+                const total = inputTokens + outputTokens;
+
+                prisma.tokenUsage.create({
+                  data: {
+                    apiKeyId: usedKeyId,
+                    model: targetModel,
+                    inputTokens,
+                    outputTokens,
+                    totalTokens: total,
+                    endpoint: 'quiz',
+                    userId: session?.user?.id || null,
+                  }
+                }).then(() => {
+                  return prisma.apiKey.update({
+                    where: { id: usedKeyId! },
+                    data: { tokenUsed: { increment: total } }
+                  });
+                }).catch(err => {
+                  console.error('[generate-quiz] Token usage tracking error:', err);
+                });
+              }
+
               controller.close();
             },
           });

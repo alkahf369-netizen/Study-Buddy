@@ -18,22 +18,28 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: "Invalid path" }, { status: 400 });
     }
 
-    // Security: only allow deleting from /uploads/images/ and only from user's own folder
+    // Security: only allow deleting from /api/uploads/images/ and only from user's own folder
     const userId = session.user.id;
     const userFolder = crypto.createHash('sha256').update(userId).digest('hex').slice(0, 12);
 
-    // Validate the path belongs to this user
-    if (!imagePath.startsWith(`/uploads/images/${userFolder}/`)) {
+    // Validate the path belongs to this user (ignoring query parameters that might be attached)
+    const cleanPath = imagePath.split('?')[0];
+    if (!cleanPath.startsWith(`/api/uploads/images/${userFolder}/`) && !cleanPath.startsWith(`/uploads/images/${userFolder}/`)) {
       return NextResponse.json({ error: "Forbidden" }, { status: 403 });
     }
 
     // Prevent path traversal
-    const normalizedPath = path.normalize(imagePath);
+    const normalizedPath = path.normalize(cleanPath);
     if (normalizedPath.includes('..')) {
       return NextResponse.json({ error: "Invalid path" }, { status: 400 });
     }
 
-    const filePath = path.join(process.cwd(), 'public', normalizedPath);
+    // Remove the /api prefix if it exists to map back to the actual public folder physical path
+    const physicalPath = normalizedPath.startsWith('/api') 
+      ? normalizedPath.replace('/api', '') 
+      : normalizedPath;
+      
+    const filePath = path.join(process.cwd(), 'public', physicalPath);
 
     if (existsSync(filePath)) {
       await unlink(filePath);

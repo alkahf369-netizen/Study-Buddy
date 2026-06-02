@@ -93,7 +93,8 @@ export async function POST(req: Request) {
     const filename = `${imageId}.png`;
     const uploadsDir = path.join(process.cwd(), 'public', 'uploads', 'images', userFolder);
     const filePath = path.join(uploadsDir, filename);
-    const localPath = `/uploads/images/${userFolder}/${filename}`;
+    // Use API route explicitly to bypass Next.js static serving limits for dynamically generated files
+    const localPath = `/api/uploads/images/${userFolder}/${filename}`;
 
     let savedLocally = false;
     try {

@@ -3996,7 +3996,7 @@ const ChatMessage = ({ role, content, modelName, modelProvider, files, quiz, gen
               <>
                 <div className="mx-1 h-4 w-px bg-zinc-200" />
                 <a
-                  href={generatedImage}
+                  href={`${generatedImage}${generatedImage.includes('?') ? '&' : '?'}download=1`}
                   download={`study-buddy-image-${Date.now()}.png`}
                   title="Download image"
                   className="flex h-7 w-7 items-center justify-center rounded-md hover:bg-zinc-100 hover:text-zinc-700 transition-colors"

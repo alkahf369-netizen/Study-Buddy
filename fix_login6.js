@@ -1,4 +1,9 @@
-"use client";
+const fs = require('fs');
+const file = "/var/www/my-ai-teacher/src/app/login/page.tsx";
+let data = fs.readFileSync(file, 'utf8');
+
+// I completely botched the replace. Reverting the file back to original and doing it cleanly.
+data = `"use client";
 import React, { useState, useEffect, useRef } from "react";
 import GoogleForm from "./form";
 import {
@@ -27,16 +32,16 @@ import {
 
 const cn = (...cls) => cls.filter(Boolean).join(" ");
 
-const WordMark = ({ onDark = true }: { onDark?: boolean }) => (
+const WordMark = ({ onDark = true }) => (
   <div className="inline-flex items-center gap-2.5">
     <img
       src="/study-buddy-logo.svg"
       alt="Study Buddy"
-      className={`h-7 w-7 ${onDark ? "text-white" : "text-black"}`}
+      className={\`h-7 w-7 \${onDark ? "text-white" : "text-black"}\`}
       style={{ objectFit: "contain" }}
     />
     <span
-      className={`text-[16px] font-semibold tracking-[-0.005em] ${onDark ? "text-white" : "text-black"}`}
+      className={\`text-[16px] font-semibold tracking-[-0.005em] \${onDark ? "text-white" : "text-black"}\`}
       style={{ fontFamily: "'Manrope', system-ui, sans-serif" }}
     >
       Study Buddy
@@ -44,9 +49,9 @@ const WordMark = ({ onDark = true }: { onDark?: boolean }) => (
   </div>
 );
 
-const BrandPanel = () => {
+function BrandPanel() {
   const [mounted, setMounted] = useState(false);
-  const containerRef = useRef<HTMLDivElement | null>(null);
+  const containerRef = useRef(null);
 
   useEffect(() => {
     setMounted(true);
@@ -54,15 +59,15 @@ const BrandPanel = () => {
     if (!container) return;
 
     let rafId;
-    const handleMouseMove = (e: MouseEvent) => {
+    const handleMouseMove = (e) => {
       if (!container) return;
       const rect = container.getBoundingClientRect();
       const x = (e.clientX - rect.left - rect.width / 2) * 0.05;
       const y = (e.clientY - rect.top - rect.height / 2) * 0.05;
 
       rafId = requestAnimationFrame(() => {
-        container.style.setProperty("--mx", `${x}px`);
-        container.style.setProperty("--my", `${y}px`);
+        container.style.setProperty("--mx", \`\${x}px\`);
+        container.style.setProperty("--my", \`\${y}px\`);
       });
     };
 
@@ -76,7 +81,7 @@ const BrandPanel = () => {
   return (
     <div
       ref={containerRef}
-      className={`lp-grid relative hidden overflow-hidden bg-black text-white md:flex md:w-[46%] md:min-w-[460px] md:flex-col`}
+      className={\`lp-grid relative hidden overflow-hidden bg-black text-white md:flex md:w-[46%] md:min-w-[460px] md:flex-col\`}
     >
       <div
         aria-hidden="true"
@@ -125,7 +130,7 @@ const BrandPanel = () => {
   );
 }
 
-function TypewriterText({ text, delay }: { text: string; delay: number }) {
+function TypewriterText({ text, delay }) {
   const [visibleChars, setVisibleChars] = useState(0);
 
   useEffect(() => {
@@ -321,3 +326,7 @@ export default function LoginPage() {
     </div>
   );
 }
+`;
+
+fs.writeFileSync(file, data);
+

@@ -1,0 +1,7 @@
+  const handleLike = () => {
+    if (onFeedback) onFeedback(liked ? null : "like");
+  };
+
+  const handleUnlike = () => {
+    if (onFeedback) onFeedback(unliked ? null : "dislike");
+  };

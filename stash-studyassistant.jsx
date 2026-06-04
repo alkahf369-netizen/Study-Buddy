@@ -911,10 +911,10 @@ const ImageDropdown = ({ label, options, value, onChange, testId, icon, models }
       </button>
       {open && (
         <div
-          className="absolute bottom-full left-0 z-50 mb-1.5 min-w-[200px] origin-bottom overflow-hidden rounded-xl border border-zinc-200 bg-white/95 p-1 shadow-xl backdrop-blur-sm"
+          className="absolute top-full left-0 z-50 mt-1.5 min-w-[200px] origin-top overflow-hidden rounded-xl border border-zinc-200 bg-white/95 p-1 shadow-xl backdrop-blur-sm"
           style={{
             animation: "dropdownIn 180ms cubic-bezier(0.22, 0.85, 0.3, 1) both",
-            transformOrigin: "bottom left",
+            transformOrigin: "top left",
           }}
         >
           {options.map((opt) => {
@@ -2738,7 +2738,7 @@ const MCQComposer = ({ onSubmitText, onUpload, sendOnEnter, section, onSectionCh
 
   return (
     <div className="mx-auto w-full max-w-4xl px-4 sm:px-6">
-      <div className={cn("group relative rounded-2xl border border-zinc-200 bg-white/80 p-2 shadow-[0_12px_40px_rgba(17,24,39,0.06),inset_0_1px_0_rgba(255,255,255,0.9)] backdrop-blur-2xl backdrop-saturate-150 transition-all duration-300 focus-within:border-zinc-400 focus-within:shadow-[0_16px_50px_rgba(17,24,39,0.10),inset_0_1px_0_rgba(255,255,255,1)]", mcqLoading && "sine-wave-border")}>
+      <div className="group relative rounded-2xl border border-zinc-200 bg-white/80 p-2 shadow-[0_12px_40px_rgba(17,24,39,0.06),inset_0_1px_0_rgba(255,255,255,0.9)] backdrop-blur-2xl backdrop-saturate-150 transition-all duration-300 focus-within:border-zinc-400 focus-within:shadow-[0_16px_50px_rgba(17,24,39,0.10),inset_0_1px_0_rgba(255,255,255,1)]">
         <div className="pointer-events-none absolute inset-0 rounded-2xl bg-gradient-to-b from-white/60 to-transparent opacity-70" />
 
         <div className="relative">
@@ -2750,7 +2750,7 @@ const MCQComposer = ({ onSubmitText, onUpload, sendOnEnter, section, onSectionCh
             onChange={handleInput}
             onKeyDown={handleKey}
             placeholder="Paste text or upload a file to generate MCQs..."
-            className="block max-h-[220px] w-full resize-none bg-transparent px-4 pt-3 pb-2 text-[15px] leading-relaxed text-black placeholder:text-zinc-400 outline-none overflow-y-auto"
+            className="block max-h-[220px] w-full resize-none bg-transparent px-4 pt-3 pb-2 text-[15px] leading-relaxed text-black placeholder:text-zinc-400 outline-none"
           />
 
           {/* Uploaded file indicator + PageRangeSelector for PDFs */}
@@ -3279,7 +3279,7 @@ const ChatComposer = ({ models, onSend, onQuizSubmit, onImageGenerate, model, on
 
   return (
     <div className="mx-auto w-full max-w-4xl px-4 sm:px-6">
-      <div className={cn("group relative rounded-2xl border border-zinc-200 bg-white/80 p-2 shadow-[0_12px_40px_rgba(17,24,39,0.06),inset_0_1px_0_rgba(255,255,255,0.9)] backdrop-blur-2xl backdrop-saturate-150 transition-all duration-300 focus-within:border-zinc-400 focus-within:shadow-[0_16px_50px_rgba(17,24,39,0.10),inset_0_1px_0_rgba(255,255,255,1)]", isTyping && "sine-wave-border")}>
+      <div className="group relative rounded-2xl border border-zinc-200 bg-white/80 p-2 shadow-[0_12px_40px_rgba(17,24,39,0.06),inset_0_1px_0_rgba(255,255,255,0.9)] backdrop-blur-2xl backdrop-saturate-150 transition-all duration-300 focus-within:border-zinc-400 focus-within:shadow-[0_16px_50px_rgba(17,24,39,0.10),inset_0_1px_0_rgba(255,255,255,1)]">
         <div className="pointer-events-none absolute inset-0 rounded-2xl bg-gradient-to-b from-white/60 to-transparent opacity-70" />
 
         <div className="relative">
@@ -3378,7 +3378,7 @@ const ChatComposer = ({ models, onSend, onQuizSubmit, onImageGenerate, model, on
                 onBlur={() => setTimeout(() => setSlashOpen(false), 150)}
                 placeholder={isMcqMode ? "Paste text or describe what to quiz on..." : isImageMode ? "Describe the image you want to generate..." : "Ask anything — type / for commands, or attach an image / PDF..."}
                 className={cn(
-                  "relative block max-h-[220px] w-full resize-none bg-transparent text-[15px] leading-relaxed outline-none placeholder:text-zinc-400 overflow-y-auto",
+                  "relative block max-h-[220px] w-full resize-none bg-transparent text-[15px] leading-relaxed outline-none placeholder:text-zinc-400",
                   // Hide the slash token visually (rendered by overlay) but only when overlay is active
                   !isMcqMode && !isImageMode && /(^|\s)\/[\w-]*/.test(text)
                     ? "text-transparent caret-zinc-900 selection:bg-zinc-200/80 selection:text-transparent"
@@ -3835,7 +3835,13 @@ const ChatMessage = ({ role, content, modelName, modelProvider, files, quiz, gen
   const liked = feedback === "like";
   const unliked = feedback === "dislike";
 
-
+  const handleCopy = () => {
+    if (content) {
+      navigator.clipboard.writeText(content);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    }
+  };
 
   const handleLike = () => {
     if (onFeedback) onFeedback(liked ? null : "like");
@@ -3867,28 +3873,6 @@ const ChatMessage = ({ role, content, modelName, modelProvider, files, quiz, gen
       displayContent = imageMatch ? imageMatch[0] : "";
     }
   }
-
-  const handleCopy = async () => {
-    const textToCopy = displayContent || content || "";
-    if (!textToCopy) return;
-    try {
-      if (typeof navigator !== 'undefined' && navigator?.clipboard?.writeText) {
-        await navigator.clipboard.writeText(textToCopy);
-      } else {
-        const ta = document.createElement("textarea");
-        ta.value = textToCopy;
-        ta.style.position = "fixed";
-        ta.style.top = "-999999px";
-        document.body.appendChild(ta);
-        ta.focus();
-        ta.select();
-        try { document.execCommand('copy'); } catch(e){}
-        ta.remove();
-      }
-      setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
-    } catch(err) {}
-  };
   return (
     <div
       data-testid={`chat-message-${role}`}
@@ -4012,7 +3996,7 @@ const ChatMessage = ({ role, content, modelName, modelProvider, files, quiz, gen
               <>
                 <div className="mx-1 h-4 w-px bg-zinc-200" />
                 <a
-                  href={`${generatedImage}${generatedImage.includes('?') ? '&' : '?'}download=1`}
+                  href={generatedImage}
                   download={`study-buddy-image-${Date.now()}.png`}
                   title="Download image"
                   className="flex h-7 w-7 items-center justify-center rounded-md hover:bg-zinc-100 hover:text-zinc-700 transition-colors"

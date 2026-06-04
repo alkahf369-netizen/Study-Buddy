@@ -899,3 +899,35 @@ code {
     animation: none !important;
   }
 }
+@keyframes border-sine {
+  0% {
+    background-position: 0% 50%;
+  }
+  50% {
+    background-position: 100% 50%;
+  }
+  100% {
+    background-position: 0% 50%;
+  }
+}
+
+.sine-wave-border {
+  position: relative;
+  /* hide the original static border if this is active */
+  border-color: transparent !important;
+}
+
+.sine-wave-border::before {
+  content: "";
+  position: absolute;
+  inset: -1px;
+  border-radius: inherit;
+  padding: 2px; /* width of the animated border */
+  background: linear-gradient(90deg, #e4e4e7, #3b82f6, #8b5cf6, #ec4899, #3b82f6, #e4e4e7);
+  background-size: 300% 100%;
+  -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+  -webkit-mask-composite: xor;
+  mask-composite: exclude;
+  animation: border-sine 2s ease-in-out infinite;
+  pointer-events: none;
+}

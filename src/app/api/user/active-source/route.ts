@@ -19,7 +19,7 @@ export async function GET() {
       select: { id: true, name: true }
     });
 
-    let userActiveKey = null;
+    let userActiveKey: any = null;
     if (session?.user?.id) {
       userActiveKey = await prisma.apiKey.findFirst({
         where: { userId: session.user.id, isActive: true, isPublic: false },

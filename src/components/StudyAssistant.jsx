@@ -2626,7 +2626,7 @@ const Sidebar = ({
 };
 
 /* ---------------- MCQ Composer (upload-focused) ---------------- */
-const MCQComposer = ({ onSubmitText, onUpload, sendOnEnter, section, onSectionChange }) => {  const [text, setText] = useState("");
+const MCQComposer = ({ onSubmitText, onUpload, sendOnEnter, section, onSectionChange, mcqLoading }) => {  const [text, setText] = useState("");
   const [fileSizeError, setFileSizeError] = useState("");
   const [uploadedFile, setUploadedFile] = useState(null); // { file, base64Data, mimeType }
   const [pageRanges, setPageRanges] = useState({}); // keyed by file index
@@ -3056,7 +3056,7 @@ const SLASH_COMMANDS = [
 ];
 
 /* ---------------- Chat Composer (with model switcher + file upload) ---------------- */
-const ChatComposer = ({ models, onSend, onQuizSubmit, onImageGenerate, model, onModelChange, imageModel, onImageModelChange, imageResolution, onImageResolutionChange, imageAspectRatio, onImageAspectRatioChange, sendOnEnter, disabled, section, onSectionChange }) => {
+const ChatComposer = ({ models, onSend, onQuizSubmit, onImageGenerate, model, onModelChange, imageModel, onImageModelChange, imageResolution, onImageResolutionChange, imageAspectRatio, onImageAspectRatioChange, sendOnEnter, disabled, section, onSectionChange, isTyping }) => {
   const [text, setText] = useState("");
   const [files, setFiles] = useState([]); // File[]
   const [pageRanges, setPageRanges] = useState({}); // keyed by file index
@@ -5994,6 +5994,7 @@ export default function StudyAssistant() {
                 disabled={isTyping}
                 section={section}
                 onSectionChange={setSection}
+                isTyping={isTyping}
               />
           </DraggableComposer>
         </main>
